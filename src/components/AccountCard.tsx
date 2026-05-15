@@ -255,8 +255,10 @@ function buildQuotaSummary(
   const usage = usageInput as Record<string, unknown> | null;
   const status = statusInput as Record<string, unknown> | null;
   const planName = pickString(status, ["plan_slug", "plan", "plan_name", "tier"]);
-  const dailyPercentage = pickNumber(usage, ["daily_percentage"]);
-  const weeklyPercentage = pickNumber(usage, ["weekly_percentage"]);
+  const dailyUsedPercentage = pickNumber(usage, ["daily_percentage"]);
+  const weeklyUsedPercentage = pickNumber(usage, ["weekly_percentage"]);
+  const dailyPercentage = toAvailablePercentage(dailyUsedPercentage);
+  const weeklyPercentage = toAvailablePercentage(weeklyUsedPercentage);
   const resetAt = pickString(usage, [
     "daily_reset_at",
     "weekly_reset_at",
@@ -274,10 +276,10 @@ function buildQuotaSummary(
     dailyDetail: resetAt
       ? `Сброс ${formatDate(resetAt)}`
       : dailyPercentage === 0
-        ? "Лимит на сегодня исчерпан"
-        : "Остаток на сегодня",
+        ? "Квота на сегодня закончилась"
+        : "Доступно на сегодня",
     weeklyDetail:
-      weeklyPercentage === 0 ? "Лимит на неделю исчерпан" : "Остаток на неделю",
+      weeklyPercentage === 0 ? "Квота на неделю закончилась" : "Доступно на неделю",
   };
 }
 
@@ -311,7 +313,7 @@ function QuotaBar({
 }) {
   const clamped = Math.max(0, Math.min(100, percentage));
   const tone = getQuotaTone(clamped);
-  const width = clamped === 0 ? "8px" : `${clamped}%`;
+  const width = `${clamped}%`;
 
   return (
     <div className="space-y-1">
@@ -398,6 +400,11 @@ function shrinkId(value: string, size: number): string {
 
 function humanize(value: string): string {
   return value.replace(/[_-]+/g, " ");
+}
+
+function toAvailablePercentage(usedPercentage: number | null): number | null {
+  if (usedPercentage === null) return null;
+  return Math.max(0, Math.min(100, 100 - usedPercentage));
 }
 
 function getQuotaTone(percentage: number) {
