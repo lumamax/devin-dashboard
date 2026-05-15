@@ -121,3 +121,21 @@ test("getEnv throws when OMNIROUTE_TOKEN is missing", async () => {
     /OMNIROUTE_TOKEN/
   );
 });
+
+test("listStoredAccounts does not call the SQLite fallback when the API succeeds", async () => {
+  process.env.OMNIROUTE_TOKEN = "test-token";
+  process.env.OMNIROUTE_URL = "http://omniroute.test";
+  // Set a bogus DB path that would crash sqlite3 if it ran.
+  process.env.OMNIROUTE_DB_PATH = "/nonexistent/path/that/should/never/be/touched.sqlite";
+  const mod = await import("../src/lib/connectionStore.ts");
+  const result = await withMockedOmniroute(
+    () =>
+      new Response(JSON.stringify({ connections: [] }), {
+        status: 200,
+        headers: { "content-type": "application/json" },
+      }),
+    async () => mod.listStoredAccounts()
+  );
+  assert.deepEqual(result, [], "empty list from API should pass through without invoking SQLite");
+  delete process.env.OMNIROUTE_DB_PATH;
+});
