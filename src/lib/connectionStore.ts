@@ -45,6 +45,13 @@ type SaveAccountInput = {
 
 type JsonRecord = Record<string, unknown>;
 
+export class MissingConfigError extends Error {
+  constructor(message: string) {
+    super(message);
+    this.name = "MissingConfigError";
+  }
+}
+
 function getEnv() {
   return {
     url: (process.env.OMNIROUTE_URL || "http://localhost:20128").replace(
@@ -53,6 +60,16 @@ function getEnv() {
     ),
     token: process.env.OMNIROUTE_TOKEN || "",
   };
+}
+
+function requireAuthedEnv() {
+  const env = getEnv();
+  if (!env.token.trim()) {
+    throw new MissingConfigError(
+      "OMNIROUTE_TOKEN is not set. Add a providers:write token in .env.local before saving Devin accounts."
+    );
+  }
+  return env;
 }
 
 function getDbPath(): string {
@@ -79,9 +96,13 @@ export async function getStoredAccount(
 export async function saveAccount(
   input: SaveAccountInput,
 ): Promise<{ id: string }> {
-  const viaApi = await saveAccountViaApi(input).catch(() => null);
-  if (viaApi) return viaApi;
-  return saveAccountDirect(input);
+  try {
+    return await saveAccountViaApi(input);
+  } catch (error) {
+    if (error instanceof MissingConfigError) throw error;
+    console.warn("[connectionStore] OmniRoute API save failed, falling back to SQLite:", error);
+    return saveAccountDirect(input);
+  }
 }
 
 export async function updateAccountCreds(
@@ -89,12 +110,13 @@ export async function updateAccountCreds(
   creds: DevinCreds,
   providerSpecificData?: Record<string, unknown> | null,
 ): Promise<void> {
-  const saved = await updateAccountViaApi(
-    id,
-    creds,
-    providerSpecificData,
-  ).catch(() => false);
-  if (saved) return;
+  try {
+    const saved = await updateAccountViaApi(id, creds, providerSpecificData);
+    if (saved) return;
+  } catch (error) {
+    if (error instanceof MissingConfigError) throw error;
+    console.warn("[connectionStore] OmniRoute API credential update failed, falling back to SQLite:", error);
+  }
   updateAccountDirect(id, creds, providerSpecificData);
 }
 
@@ -116,7 +138,7 @@ async function listStoredAccountsViaApi(): Promise<StoredDevinAccount[]> {
 async function saveAccountViaApi(
   input: SaveAccountInput,
 ): Promise<{ id: string }> {
-  const { url, token } = getEnv();
+  const { url, token } = requireAuthedEnv();
   const body = {
     provider: "devin-web",
     name: input.name,
@@ -162,7 +184,7 @@ async function updateAccountViaApi(
   creds: DevinCreds,
   providerSpecificData?: Record<string, unknown> | null,
 ): Promise<boolean> {
-  const { url, token } = getEnv();
+  const { url, token } = requireAuthedEnv();
   const headers: Record<string, string> = {
     "Content-Type": "application/json",
     Accept: "application/json",

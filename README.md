@@ -150,6 +150,18 @@ npx next build
 
 10 unit tests, all passing.
 
+## Cloud-agent workflow
+
+If this repo is being used as the current multi-account Devin pilot, start here:
+
+- `AGENTS.md`
+- `docs/cloud-agent-operating-model.md`
+- `docs/handoffs/LATEST.md`
+- `docs/handoffs/TEMPLATE.md`
+- `.github/PULL_REQUEST_TEMPLATE/devin_pr_template.md`
+
+These files define how local supervision, cloud Devin agents, git continuity, and handoff discipline work in this contour.
+
 ## Roadmap
 
 - **v0.2 (this release)** — Auto-login wizard, JSON-blob credential storage,

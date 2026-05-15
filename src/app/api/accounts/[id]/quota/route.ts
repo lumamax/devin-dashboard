@@ -8,7 +8,11 @@
 
 import { NextResponse } from "next/server";
 import { devinGet } from "@/lib/devinApi";
-import { getStoredAccount, updateAccountCreds } from "@/lib/connectionStore";
+import {
+  getStoredAccount,
+  MissingConfigError,
+  updateAccountCreds,
+} from "@/lib/connectionStore";
 
 const KNOWN_MODEL_TAGS = [
   { tag: "agent-preview:devin-opus-4-7", label: "Opus 4.7" },
@@ -44,7 +48,15 @@ export async function GET(
   }
 
   const onRefresh = async (next: typeof account.creds) => {
-    if (next) await updateAccountCreds(id, next);
+    if (!next) return;
+    try {
+      await updateAccountCreds(id, next);
+    } catch (error) {
+      if (error instanceof MissingConfigError) {
+        return;
+      }
+      throw error;
+    }
   };
   const orgId = account.creds.orgId;
   if (!orgId) {
