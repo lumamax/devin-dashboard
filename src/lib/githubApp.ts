@@ -49,12 +49,20 @@ export type GitHubInstallationTokenRequest = {
   permissions?: GitHubAppPermissions;
 };
 
+export type GitHubInstallationRepository = {
+  id: number;
+  name: string;
+  fullName: string;
+  private: boolean | null;
+  defaultBranch: string | null;
+};
+
 export type GitHubInstallationToken = {
   token: string;
   expiresAt: string;
   permissions: GitHubAppPermissions;
   repositorySelection: string | null;
-  repositories: Array<{ id: number; name: string; fullName: string }>;
+  repositories: GitHubInstallationRepository[];
 };
 
 export type GitHubBootstrapRequest = {
@@ -213,16 +221,7 @@ export async function mintInstallationToken(
     env,
   );
 
-  const repositories = Array.isArray(json.repositories)
-    ? json.repositories
-        .map((entry) => asRecord(entry))
-        .filter((entry): entry is Record<string, unknown> => Boolean(entry))
-        .map((entry) => ({
-          id: asNumber(entry.id) || 0,
-          name: asString(entry.name) || "",
-          fullName: asString(entry.full_name) || "",
-        }))
-    : [];
+  const repositories = normalizeRepositories(json.repositories);
 
   return {
     token: asString(json.token) || "",
@@ -231,6 +230,36 @@ export async function mintInstallationToken(
     repositorySelection: asString(json.repository_selection),
     repositories,
   };
+}
+
+export async function listInstallationRepositories(
+  request: { installationId?: number | null } = {},
+  env = requireGitHubAppEnv(),
+): Promise<GitHubInstallationRepository[]> {
+  const tokenResult = await mintInstallationToken(
+    { installationId: request.installationId },
+    env,
+  );
+
+  const url = `${GITHUB_API_BASE}/installation/repositories`;
+  const response = await fetch(url, {
+    method: "GET",
+    headers: buildGitHubHeaders(`token ${tokenResult.token}`),
+    cache: "no-store",
+  });
+
+  if (!response.ok) {
+    const text = await response.text().catch(() => "");
+    throw new GitHubAppError(
+      `GitHub App GET /installation/repositories failed: ${response.status}`,
+      response.status,
+      url,
+      text.slice(0, 600),
+    );
+  }
+
+  const json = (await response.json()) as { repositories?: unknown };
+  return normalizeRepositories(json.repositories);
 }
 
 export async function buildGitHubBootstrap(
@@ -274,12 +303,7 @@ async function githubAppRequest<T>(
 ): Promise<T> {
   const url = `${GITHUB_API_BASE}${path}`;
   const jwt = createGitHubAppJwt(env);
-  const headers: Record<string, string> = {
-    Accept: "application/vnd.github+json",
-    Authorization: `Bearer ${jwt}`,
-    "User-Agent": "devin-dashboard/0.1 github-app-broker",
-    "X-GitHub-Api-Version": "2022-11-28",
-  };
+  const headers = buildGitHubHeaders(`Bearer ${jwt}`);
 
   const response = await fetch(url, {
     method: init.method,
@@ -371,6 +395,31 @@ function asString(value: unknown): string | null {
 
 function asNumber(value: unknown): number | null {
   return typeof value === "number" && Number.isFinite(value) ? value : null;
+}
+
+function buildGitHubHeaders(authorization: string): Record<string, string> {
+  return {
+    Accept: "application/vnd.github+json",
+    Authorization: authorization,
+    "User-Agent": "devin-dashboard/0.1 github-app-broker",
+    "X-GitHub-Api-Version": "2022-11-28",
+  };
+}
+
+function normalizeRepositories(value: unknown): GitHubInstallationRepository[] {
+  if (!Array.isArray(value)) return [];
+
+  return value
+    .map((entry) => asRecord(entry))
+    .filter((entry): entry is Record<string, unknown> => Boolean(entry))
+    .map((entry) => ({
+      id: asNumber(entry.id) || 0,
+      name: asString(entry.name) || "",
+      fullName: asString(entry.full_name) || "",
+      private: typeof entry.private === "boolean" ? entry.private : null,
+      defaultBranch: asString(entry.default_branch),
+    }))
+    .filter((entry) => Boolean(entry.fullName));
 }
 
 function normalizePermissions(

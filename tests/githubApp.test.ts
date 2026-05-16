@@ -109,3 +109,58 @@ test("buildGitHubBootstrap returns clone commands for a single repo", async () =
     globalThis.fetch = ORIG_FETCH;
   }
 });
+
+
+test("listInstallationRepositories returns repos available to the current installation", async () => {
+  Object.assign(process.env, makeEnv());
+  const mod = await import("../src/lib/githubApp.ts");
+  const seen: string[] = [];
+  globalThis.fetch = (async (input: RequestInfo | URL) => {
+    const url = typeof input === "string" ? input : input.toString();
+    seen.push(url);
+
+    if (url.endsWith("/access_tokens")) {
+      return new Response(
+        JSON.stringify({
+          token: "ghs_test_token",
+          expires_at: "2026-05-16T01:00:00Z",
+          permissions: { contents: "write" },
+          repositories: [],
+        }),
+        { status: 201, headers: { "content-type": "application/json" } },
+      );
+    }
+
+    return new Response(
+      JSON.stringify({
+        repositories: [
+          {
+            id: 1,
+            name: "devin-dashboard",
+            full_name: "lumamax/devin-dashboard",
+            private: true,
+            default_branch: "main",
+          },
+        ],
+      }),
+      { status: 200, headers: { "content-type": "application/json" } },
+    );
+  }) as typeof fetch;
+
+  try {
+    const repos = await mod.listInstallationRepositories();
+    assert.equal(seen[0], "https://api.github.com/app/installations/987654/access_tokens");
+    assert.equal(seen[1], "https://api.github.com/installation/repositories");
+    assert.deepEqual(repos, [
+      {
+        id: 1,
+        name: "devin-dashboard",
+        fullName: "lumamax/devin-dashboard",
+        private: true,
+        defaultBranch: "main",
+      },
+    ]);
+  } finally {
+    globalThis.fetch = ORIG_FETCH;
+  }
+});

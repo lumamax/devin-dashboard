@@ -69,6 +69,7 @@ See `docs/multi-account-git-access.md` for the current-state rationale and `docs
   - `POST /api/github-app/token`
   - `POST /api/github-app/bootstrap`
 - Local operator machine has working `.env.local` wired to the GitHub App and OmniRoute management API
+- Dashboard UI now includes a local repo-bootstrap panel that lists accessible GitHub App repos, generates short-lived clone commands, and produces a copy-ready prompt for the next Devin cloud-agent
 - Secrets were kept local only and were not committed into git
 
 ## Next best action

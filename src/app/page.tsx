@@ -2,6 +2,7 @@ import { listStoredAccounts } from "@/lib/connectionStore";
 import { AccountCard } from "@/components/AccountCard";
 import { AddAccountWizard } from "@/components/AddAccountWizard";
 import { OmniRouteStatus } from "@/components/OmniRouteStatus";
+import { RepoBootstrapPanel } from "@/components/RepoBootstrapPanel";
 import type { AccountSummary } from "@/lib/omniroute";
 
 export const dynamic = "force-dynamic";
@@ -75,6 +76,8 @@ export default async function Home() {
 
       <AddAccountWizard />
 
+      <RepoBootstrapPanel />
+
       <section className="overflow-hidden rounded-[24px] border border-white/10 bg-[rgba(11,14,20,0.88)] shadow-[0_24px_60px_rgba(0,0,0,0.35)] backdrop-blur">
         <div className="flex flex-col gap-2 border-b border-white/10 px-4 py-4 sm:px-5 lg:flex-row lg:items-center lg:justify-between">
           <div>
@@ -106,7 +109,7 @@ export default async function Home() {
               <span>Аккаунт</span>
               <span>Сессия</span>
               <span>Квота</span>
-              <span className="text-right">Запуск</span>
+              <span className="text-right">Действия</span>
             </div>
 
             <div className="divide-y divide-white/8">

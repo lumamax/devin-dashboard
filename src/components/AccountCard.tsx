@@ -176,15 +176,23 @@ export function AccountCard({ account }: { account: AccountSummary }) {
       </div>
 
       <div className="flex flex-col items-start gap-2 xl:items-end">
-        <button
-          type="button"
-          onClick={handleLaunch}
-          disabled={status === "launching"}
-          className="inline-flex min-w-[136px] items-center justify-center rounded-full border border-emerald-400/20 bg-emerald-400 px-4 py-2.5 text-sm font-semibold text-slate-950 transition hover:bg-emerald-300 disabled:cursor-not-allowed disabled:opacity-50"
-        >
-          {status === "launching" ? "Открываю…" : "Открыть"}
-        </button>
-        <p className="text-right text-[11px] leading-5 text-[#7e8ea5] xl:hidden">Отдельное окно Chrome</p>
+        <div className="flex w-full flex-col gap-2 sm:w-auto xl:items-end">
+          <button
+            type="button"
+            onClick={handleLaunch}
+            disabled={status === "launching"}
+            className="inline-flex min-w-[136px] items-center justify-center rounded-full border border-emerald-400/20 bg-emerald-400 px-4 py-2.5 text-sm font-semibold text-slate-950 transition hover:bg-emerald-300 disabled:cursor-not-allowed disabled:opacity-50"
+          >
+            {status === "launching" ? "Открываю…" : "Открыть"}
+          </button>
+          <a
+            href="#repo-bootstrap"
+            className="inline-flex min-w-[136px] items-center justify-center rounded-full border border-white/12 bg-white/[0.04] px-4 py-2.5 text-sm font-semibold text-[#e6eef8] transition hover:bg-white/[0.08]"
+          >
+            Подключить репо
+          </a>
+        </div>
+        <p className="text-right text-[11px] leading-5 text-[#7e8ea5] xl:hidden">Окно Chrome и быстрый repo-bootstrap</p>
       </div>
 
       {statusMessage ? (

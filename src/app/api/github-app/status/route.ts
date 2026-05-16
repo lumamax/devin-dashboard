@@ -4,6 +4,7 @@ import {
   getGitHubAppProfile,
   getGitHubAppStatus,
   listGitHubAppInstallations,
+  listInstallationRepositories,
 } from "@/lib/githubApp";
 
 export async function GET() {
@@ -13,15 +14,17 @@ export async function GET() {
   }
 
   try {
-    const [app, installations] = await Promise.all([
+    const [app, installations, repositories] = await Promise.all([
       getGitHubAppProfile(),
       listGitHubAppInstallations(),
+      listInstallationRepositories(),
     ]);
     return NextResponse.json({
       ok: true,
       ...status,
       app,
       installations,
+      repositories,
     });
   } catch (error) {
     if (error instanceof MissingGitHubAppConfigError) {
