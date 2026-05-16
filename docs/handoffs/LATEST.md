@@ -58,6 +58,19 @@ For the current pilot:
 
 See `docs/multi-account-git-access.md` for the current-state rationale and `docs/github-app-control-plane-plan.md` for the long-term build plan.
 
+## GitHub App status
+
+- Private GitHub App created under `@lumamax`: `lumamax-devin-control`
+- App id: `3731868`
+- Installed on selected repository: `lumamax/devin-dashboard`
+- Installation id: `132787984`
+- Local broker MVP endpoints verified on the dashboard:
+  - `GET /api/github-app/status`
+  - `POST /api/github-app/token`
+  - `POST /api/github-app/bootstrap`
+- Local operator machine has working `.env.local` wired to the GitHub App and OmniRoute management API
+- Secrets were kept local only and were not committed into git
+
 ## Next best action
 
-Register the private GitHub App under `lumamax`, install it on `lumamax/devin-dashboard`, build a local token-minting MVP, then validate that one free Devin account can clone the pilot repo with a short-lived installation token and continue from this handoff.
+Use `POST /api/github-app/bootstrap` as the canonical repo bootstrap path for the next free Devin cloud agent, then have that session clone `lumamax/devin-dashboard`, read this handoff, and continue implementation from shared git state instead of trying to reuse the previous VM.
