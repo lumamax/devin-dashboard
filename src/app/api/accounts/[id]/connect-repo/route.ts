@@ -1,24 +1,24 @@
 import { NextResponse } from "next/server";
 import { z } from "zod";
-import { buildCloudAgentPrompt } from "@/lib/bootstrapPrompt";
+import { buildRepoAttachPrompt } from "@/lib/bootstrapPrompt";
 import { getStoredAccount, updateAccountCreds } from "@/lib/connectionStore";
-import {
-  buildDevinLaunchUrl,
-  buildDevinSessionWebUrl,
-  findExistingDebugPort,
-  findFreeDebugPort,
-  seedPromptViaCdp,
-} from "@/lib/devinSessionSeeder";
-import { startAccountSession } from "@/lib/devinControlPlane";
+import { listAccountSessions, startAccountSession } from "@/lib/devinControlPlane";
 import { DevinApiError } from "@/lib/devinApi";
+import {
+  buildRepoAssignment,
+  findPreparedRepo,
+  mergePreparedRepoState,
+  type PreparedRepoRecord,
+} from "@/lib/dashboardRepoState";
 import { buildGitHubBootstrap } from "@/lib/githubApp";
-import { DEVIN_WEB_URL, LauncherError, launchChrome } from "@/lib/launcher";
+import { decideRepoAttachSession } from "@/lib/sessionPolicy";
 
 const BodySchema = z
   .object({
     owner: z.string().trim().min(1),
     repo: z.string().trim().min(1),
     branch: z.string().trim().min(1).default("main"),
+    modelOverride: z.string().trim().min(1).optional(),
   })
   .strict();
 
@@ -28,10 +28,7 @@ export async function POST(
 ) {
   const { id } = await params;
   if (!id) {
-    return NextResponse.json(
-      { ok: false, error: "Missing connection id" },
-      { status: 400 },
-    );
+    return NextResponse.json({ ok: false, error: "Missing connection id" }, { status: 400 });
   }
 
   let parsed: z.infer<typeof BodySchema>;
@@ -46,18 +43,12 @@ export async function POST(
     }
     parsed = result.data;
   } catch {
-    return NextResponse.json(
-      { ok: false, error: "Invalid JSON body" },
-      { status: 400 },
-    );
+    return NextResponse.json({ ok: false, error: "Invalid JSON body" }, { status: 400 });
   }
 
   const account = await getStoredAccount(id).catch(() => null);
   if (!account) {
-    return NextResponse.json(
-      { ok: false, error: "Account not found" },
-      { status: 404 },
-    );
+    return NextResponse.json({ ok: false, error: "Account not found" }, { status: 404 });
   }
   if (!account.creds) {
     return NextResponse.json(
@@ -72,135 +63,193 @@ export async function POST(
       repo: parsed.repo,
       branch: parsed.branch,
     });
-    const prompt = buildCloudAgentPrompt(bootstrap);
+    const repoAssignment = buildRepoAssignment(parsed.owner, parsed.repo, parsed.branch);
+    const prompt = buildRepoAttachPrompt(bootstrap);
+    const existingPrepared = findPreparedRepo(account.providerSpecificData, repoAssignment.fullName);
+    const recentSessions = await listAccountSessions(id, { limit: 12, mineOnly: true }).catch(() => null);
+    const decision = decideRepoAttachSession({
+      targetRepoFullName: repoAssignment.fullName,
+      sessions: recentSessions?.sessions || [],
+      lastPreparedSessionId: existingPrepared?.sessionId || null,
+    });
 
-    const currentDashboard =
-      account.providerSpecificData?.devinDashboard &&
-      typeof account.providerSpecificData.devinDashboard === "object" &&
-      !Array.isArray(account.providerSpecificData.devinDashboard)
-        ? (account.providerSpecificData.devinDashboard as Record<string, unknown>)
-        : {};
+    if (existingPrepared) {
+      const preparedRecord = normalizePreparedRepo(existingPrepared, repoAssignment.branch, decision.action === "reuse" ? decision.session.devinId : existingPrepared.sessionId);
+      await updateAccountCreds(
+        id,
+        account.creds,
+        mergePreparedRepoState(account.providerSpecificData, repoAssignment, preparedRecord),
+      );
 
-    const providerSpecificData = {
-      ...(account.providerSpecificData || {}),
-      devinDashboard: {
-        ...currentDashboard,
-        repoAssignment: {
-          owner: parsed.owner,
-          repo: parsed.repo,
-          branch: parsed.branch,
-          fullName: `${parsed.owner}/${parsed.repo}`,
+      return NextResponse.json({
+        ok: true,
+        sessionAction: decision.action === "reuse" ? "reused" : "already-prepared",
+        startedSession: preparedRecord.sessionId
+          ? {
+              sessionId: preparedRecord.sessionId,
+              username: null,
+              modelOverride: null,
+            }
+          : null,
+        preparedRepo: toPreparedRepoPayload(preparedRecord),
+        assignment: repoAssignment,
+      });
+    }
+
+    if (decision.action === "blocked") {
+      const label = decision.session.title?.trim() || shrinkId(decision.session.devinId, 6);
+      return NextResponse.json(
+        {
+          ok: false,
+          error: `У этого аккаунта уже есть живая Devin-сессия: ${label}. Сначала закончи её, потом прошивай новый repo.`,
+          code: "live_session_exists",
+        },
+        { status: 409 },
+      );
+    }
+
+    if (decision.action === "reuse") {
+      const preparedRecord = normalizePreparedRepo(
+        {
+          repoFullName: repoAssignment.fullName,
+          branch: repoAssignment.branch,
+          sessionId: decision.session.devinId,
+          mode: "attach-only",
           updatedAt: new Date().toISOString(),
         },
-      },
-    };
+        repoAssignment.branch,
+        decision.session.devinId,
+      );
 
-    await updateAccountCreds(id, account.creds, providerSpecificData);
+      await updateAccountCreds(
+        id,
+        account.creds,
+        mergePreparedRepoState(account.providerSpecificData, repoAssignment, preparedRecord),
+      );
 
-    let backendSeed = null;
-    let backendStartError: {
-      message: string;
-      status: number | null;
-      detail: string | null;
-    } | null = null;
+      return NextResponse.json({
+        ok: true,
+        sessionAction: "reused",
+        startedSession: {
+          sessionId: decision.session.devinId,
+          username: null,
+          modelOverride: null,
+        },
+        preparedRepo: toPreparedRepoPayload(preparedRecord),
+        assignment: repoAssignment,
+      });
+    }
 
+    let backendSeed;
     try {
       backendSeed = await startAccountSession(id, {
         prompt,
-        modelOverride: "devin-opus-4-7",
+        modelOverride: parsed.modelOverride || "devin-opus-4-7",
       });
     } catch (error) {
-      backendStartError = {
+      const backendStartError = {
         message: error instanceof Error ? error.message : String(error),
         status: error instanceof DevinApiError ? error.status : null,
         detail: error instanceof DevinApiError ? error.bodyText : null,
       };
-    }
 
-    const launchContext = account.launchContext || null;
-    const userDataDir =
-      launchContext?.launchStrategy === "user-data-dir"
-        ? launchContext.userDataDir
-        : launchContext?.launchStrategy === "chrome-profile"
-          ? launchContext.chromeUserDataDir
-          : undefined;
-    const existingDebugPort = userDataDir
-      ? findExistingDebugPort(userDataDir)
-      : null;
-    const chromePort =
-      existingDebugPort || (await findFreeDebugPort().catch(() => null));
-    const launchToken = `${id}-${Date.now()}`;
-    const launchUrl = backendSeed
-      ? buildDevinSessionWebUrl(backendSeed.sessionId)
-      : chromePort
-        ? buildDevinLaunchUrl(launchToken)
-        : DEVIN_WEB_URL;
-    const launch = launchChrome({
-      connectionId: id,
-      url: launchUrl,
-      remoteDebuggingPort: chromePort || undefined,
-      userDataDir,
-      profileDirectory:
-        launchContext?.launchStrategy === "chrome-profile"
-          ? launchContext.chromeProfileDirectory
-          : undefined,
-    });
-
-    const autoSeed = backendSeed
-      ? {
-          attempted: true,
-          ok: true,
-          reason: null,
-          action: "created_session_via_api",
-          pageUrl: launchUrl,
-        }
-      : chromePort
-        ? await seedPromptViaCdp({
-            chromePort,
-            prompt,
-            launchToken,
-          })
-        : {
-            attempted: false,
-            ok: false,
-            reason: "debug_port_unavailable",
-            action: null,
-            pageUrl: null,
-          };
-
-    return NextResponse.json({
-      ok: true,
-      launched: launch,
-      bootstrap,
-      prompt,
-      autoSeed,
-      startedSession: backendSeed
-        ? {
-            sessionId: backendSeed.sessionId,
-            username: backendSeed.username,
-            modelOverride: backendSeed.modelOverride,
-          }
-        : null,
-      backendStartError,
-      assignment: {
-        owner: parsed.owner,
-        repo: parsed.repo,
-        branch: parsed.branch,
-        fullName: `${parsed.owner}/${parsed.repo}`,
-      },
-    });
-  } catch (error) {
-    if (error instanceof LauncherError) {
       return NextResponse.json(
-        { ok: false, error: error.message, code: error.code },
-        { status: error.code === "browser_not_found" ? 500 : 400 },
+        {
+          ok: false,
+          error: describeBackendStartError(backendStartError),
+          code: inferBackendErrorCode(backendStartError),
+          backendStartError,
+          assignment: repoAssignment,
+        },
+        { status: backendStartError.status === 403 ? 409 : 502 },
       );
     }
 
-    const message = error instanceof Error ? error.message : "Unknown error";
-    return NextResponse.json(
-      { ok: false, error: message },
-      { status: 500 },
+    const preparedRecord = normalizePreparedRepo(
+      {
+        repoFullName: repoAssignment.fullName,
+        branch: repoAssignment.branch,
+        sessionId: backendSeed.sessionId,
+        mode: "attach-only",
+        updatedAt: new Date().toISOString(),
+      },
+      repoAssignment.branch,
+      backendSeed.sessionId,
     );
+
+    await updateAccountCreds(
+      id,
+      account.creds,
+      mergePreparedRepoState(account.providerSpecificData, repoAssignment, preparedRecord),
+    );
+
+    return NextResponse.json({
+      ok: true,
+      sessionAction: "created",
+      startedSession: {
+        sessionId: backendSeed.sessionId,
+        username: backendSeed.username,
+        modelOverride: backendSeed.modelOverride,
+      },
+      preparedRepo: toPreparedRepoPayload(preparedRecord),
+      assignment: repoAssignment,
+    });
+  } catch (error) {
+    const message = error instanceof Error ? error.message : "Unknown error";
+    return NextResponse.json({ ok: false, error: message }, { status: 500 });
   }
+}
+
+function normalizePreparedRepo(
+  record: PreparedRepoRecord,
+  branch: string,
+  sessionId: string | null,
+): PreparedRepoRecord {
+  return {
+    repoFullName: record.repoFullName,
+    branch: record.branch || branch,
+    sessionId,
+    mode: "attach-only",
+    updatedAt: record.updatedAt || new Date().toISOString(),
+  };
+}
+
+function toPreparedRepoPayload(record: PreparedRepoRecord) {
+  return {
+    fullName: record.repoFullName,
+    branch: record.branch,
+    sessionId: record.sessionId,
+    updatedAt: record.updatedAt,
+  };
+}
+
+function describeBackendStartError(error: { status: number | null; detail: string | null; message: string | null }) {
+  const detail = String(error.detail || "").toLowerCase();
+  if (detail.includes("out_of_quota")) {
+    return "У этого аккаунта закончилась квота, новую Devin-сессию сейчас не создать.";
+  }
+  if (detail.includes("billing error")) {
+    return "У этого аккаунта billing-блокировка, поэтому backend Devin не дал создать новую сессию.";
+  }
+  if (detail.includes("no seat allocated")) {
+    return "У аккаунта сейчас нет свободного seat для новой Devin-сессии.";
+  }
+  if (error.status === 403) {
+    return "Backend Devin отклонил запуск новой сессии.";
+  }
+  return error.message || "Не удалось создать Devin-сессию.";
+}
+
+function inferBackendErrorCode(error: { detail: string | null; status: number | null }) {
+  const detail = String(error.detail || "").toLowerCase();
+  if (detail.includes("out_of_quota")) return "out_of_quota";
+  if (detail.includes("billing error")) return "billing_error";
+  if (detail.includes("no seat allocated")) return "no_seat_allocated";
+  if (error.status === 403) return "backend_forbidden";
+  return "backend_start_failed";
+}
+
+function shrinkId(value: string, size: number): string {
+  if (value.length <= size * 2 + 1) return value;
+  return `${value.slice(0, size)}…${value.slice(-size)}`;
 }

@@ -1,9 +1,10 @@
-import { listStoredAccounts } from "@/lib/connectionStore";
 import { AccountCard } from "@/components/AccountCard";
 import { AddAccountWizard } from "@/components/AddAccountWizard";
 import { OmniRouteStatus } from "@/components/OmniRouteStatus";
 import { RepoBootstrapPanel } from "@/components/RepoBootstrapPanel";
-import { PickBestAccountPanel } from "@/components/PickBestAccountPanel";
+import { orderStoredAccountsByHealth } from "@/lib/accountOrdering";
+import { listStoredAccounts } from "@/lib/connectionStore";
+import { readPreparedRepos, readRepoAssignment } from "@/lib/dashboardRepoState";
 import type { AccountSummary } from "@/lib/omniroute";
 
 export const dynamic = "force-dynamic";
@@ -14,23 +15,31 @@ export default async function Home() {
 
   try {
     const stored = await listStoredAccounts();
-    accounts = stored.map((a) => {
-      const repoAssignment = readRepoAssignment(a.providerSpecificData);
+    const ordered = await orderStoredAccountsByHealth(stored).catch(() => stored);
+    accounts = ordered.map((account) => {
+      const repoAssignment = readRepoAssignment(account.providerSpecificData);
+      const preparedRepos = readPreparedRepos(account.providerSpecificData).map((repo) => ({
+        fullName: repo.repoFullName,
+        branch: repo.branch,
+        sessionId: repo.sessionId,
+        updatedAt: repo.updatedAt,
+      }));
 
       return {
-        id: a.id,
-        name: a.name,
-        priority: a.priority,
-        testStatus: a.testStatus,
-        rateLimitedUntil: a.rateLimitedUntil,
-        lastError: a.lastError,
-        createdAt: a.createdAt,
-        updatedAt: a.updatedAt,
-        hasCreds: a.creds !== null,
-        orgId: a.creds?.orgId || null,
-        bearerPreview: a.creds?.bearer ? `${a.creds.bearer.slice(0, 16)}…` : null,
+        id: account.id,
+        name: account.name,
+        priority: account.priority,
+        testStatus: account.testStatus,
+        rateLimitedUntil: account.rateLimitedUntil,
+        lastError: account.lastError,
+        createdAt: account.createdAt,
+        updatedAt: account.updatedAt,
+        hasCreds: account.creds !== null,
+        orgId: account.creds?.orgId || null,
+        bearerPreview: account.creds?.bearer ? `${account.creds.bearer.slice(0, 16)}…` : null,
         assignedRepoFullName: repoAssignment?.fullName || null,
         assignedBranch: repoAssignment?.branch || null,
+        preparedRepos,
       };
     });
   } catch (err: unknown) {
@@ -48,29 +57,29 @@ export default async function Home() {
   }).length;
 
   return (
-    <main className="mx-auto flex min-h-screen w-full max-w-[1880px] flex-col gap-4 px-4 py-4 sm:px-6 lg:px-8 lg:py-6 2xl:max-w-[2100px] 2xl:px-10">
-      <section className="overflow-hidden rounded-[24px] border border-white/10 bg-[linear-gradient(180deg,rgba(18,22,29,0.97),rgba(10,12,18,0.94))] shadow-[0_24px_70px_rgba(0,0,0,0.42)] backdrop-blur">
-        <div className="flex flex-col gap-4 p-5 lg:flex-row lg:items-center lg:justify-between lg:p-6">
-          <div className="max-w-3xl">
+    <main className="mx-auto flex min-h-screen w-full max-w-[2280px] flex-col gap-4 px-4 py-4 sm:px-6 xl:px-8 2xl:px-10">
+      <section className="overflow-hidden rounded-[22px] border border-[#1b2330] bg-[linear-gradient(180deg,rgba(13,17,24,0.98),rgba(8,11,17,0.94))] shadow-[0_22px_64px_rgba(0,0,0,0.38)] backdrop-blur">
+        <div className="flex flex-col gap-4 px-4 py-4 lg:flex-row lg:items-center lg:justify-between lg:px-5 lg:py-4">
+          <div className="min-w-0 max-w-3xl">
             <div className="mb-2 flex flex-wrap gap-2 text-[10px] font-semibold uppercase tracking-[0.16em] text-[#8fa4bd]">
-              <span className="rounded-full border border-[#3b4454] bg-white/5 px-3 py-1 text-[#d7e0ec]">
-                Devin dashboard
+              <span className="rounded-full border border-[#2a3341] bg-[#171d28] px-3 py-1 text-[#d7e0ec]">
+                Devin Dashboard
               </span>
               <span className="rounded-full border border-emerald-400/20 bg-emerald-400/10 px-3 py-1 text-emerald-200">
                 Local OmniRoute
               </span>
             </div>
 
-            <h1 className="text-2xl font-semibold tracking-tight text-white sm:text-[2.2rem]">
+            <h1 className="text-[1.9rem] font-semibold tracking-tight text-white sm:text-[2.05rem]">
               Devin Dashboard
             </h1>
 
-            <p className="mt-2 max-w-2xl text-sm leading-6 text-[#9da8b8]">
-              Все Devin-аккаунты в одном локальном списке: быстро увидеть квоту, статус и открыть нужную сессию.
+            <p className="mt-1 text-sm leading-6 text-[#8fa0b5]">
+              Квоты, готовые repo и быстрый старт по Devin-аккаунтам.
             </p>
           </div>
 
-          <div className="grid grid-cols-2 gap-2 sm:grid-cols-4 lg:min-w-[420px] xl:min-w-[480px]">
+          <div className="grid grid-cols-2 gap-2 sm:grid-cols-4 lg:min-w-[360px] xl:min-w-[420px]">
             <StatCard label="Аккаунты" value={accounts.length} accent="text-white" />
             <StatCard label="Готовы" value={readyCount} accent="text-emerald-300" />
             <StatCard label="Перелинк" value={relinkCount} accent="text-amber-200" />
@@ -81,89 +90,50 @@ export default async function Home() {
 
       <OmniRouteStatus error={error} />
 
-      <AddAccountWizard />
-
-      <RepoBootstrapPanel />
-
-      <PickBestAccountPanel />
-
-      <section className="overflow-hidden rounded-[24px] border border-white/10 bg-[rgba(11,14,20,0.88)] shadow-[0_24px_60px_rgba(0,0,0,0.35)] backdrop-blur">
-        <div className="flex flex-col gap-2 border-b border-white/10 px-4 py-4 sm:px-5 lg:flex-row lg:items-center lg:justify-between">
-          <div>
-            <h2 className="text-lg font-semibold text-white">Аккаунты</h2>
-            <p className="mt-1 text-sm text-[#93a0b2]">
-              Короткий список аккаунтов: состояние, квота и запуск без лишней служебной информации.
-            </p>
+      <section className="grid gap-4 xl:grid-cols-[296px_minmax(0,1fr)] xl:items-start">
+        <aside className="xl:sticky xl:top-4">
+          <div className="space-y-4">
+            <AddAccountWizard />
+            <RepoBootstrapPanel />
           </div>
+        </aside>
 
-          <div className="flex flex-wrap gap-2 text-xs text-[#aab5c4]">
-            <span className="rounded-full border border-white/10 bg-white/5 px-3 py-1">
-              {accounts.length} всего
-            </span>
-            <span className="rounded-full border border-emerald-400/20 bg-emerald-400/10 px-3 py-1 text-emerald-200">
-              {readyCount} готовы
-            </span>
-          </div>
-        </div>
-
-        {accounts.length === 0 && !error ? (
-          <div className="px-4 py-8 sm:px-5">
-            <div className="rounded-[20px] border border-dashed border-white/12 bg-white/[0.03] px-5 py-6 text-sm text-[#98a6b8]">
-              Пока нет ни одного Devin-аккаунта. Нажми <b className="text-white">«Добавить аккаунт»</b> или подтяни уже открытые Chrome-сессии.
-            </div>
-          </div>
-        ) : (
-          <>
-            <div className="hidden border-b border-white/10 px-4 py-3 text-[11px] font-semibold uppercase tracking-[0.18em] text-[#748399] xl:grid xl:grid-cols-[minmax(280px,1.08fr)_minmax(330px,1fr)_minmax(236px,0.72fr)_180px] xl:gap-4 xl:px-5">
-              <span>Аккаунт</span>
-              <span>Сессия</span>
-              <span>Квота</span>
-              <span className="text-right">Действия</span>
+        <section className="overflow-hidden rounded-[22px] border border-[#1b2330] bg-[rgba(10,13,19,0.92)] shadow-[0_24px_60px_rgba(0,0,0,0.34)] backdrop-blur">
+          <div className="flex flex-col gap-3 border-b border-white/8 px-4 py-4 sm:px-5 lg:flex-row lg:items-center lg:justify-between">
+            <div>
+              <h2 className="text-lg font-semibold text-white">Аккаунты</h2>
+              <p className="mt-1 text-sm text-[#8c9caf]">
+                Сначала живые квоты, ниже exhausted и проблемные.
+              </p>
             </div>
 
-            <div className="divide-y divide-white/8">
+            <div className="flex flex-wrap gap-2 text-xs text-[#aab5c4]">
+              <span className="rounded-full border border-[#27303d] bg-[#161c27] px-3 py-1">
+                {accounts.length} всего
+              </span>
+              <span className="rounded-full border border-emerald-400/20 bg-emerald-400/10 px-3 py-1 text-emerald-200">
+                {readyCount} готовы
+              </span>
+            </div>
+          </div>
+
+          {accounts.length === 0 && !error ? (
+            <div className="px-4 py-8 sm:px-5">
+              <div className="rounded-[18px] border border-dashed border-[#27303d] bg-[#111722] px-5 py-6 text-sm text-[#98a6b8]">
+                Пока нет ни одного Devin-аккаунта. Добавь новый вход или подтяни уже открытые Chrome-сессии.
+              </div>
+            </div>
+          ) : (
+            <div className="grid gap-4 p-4 sm:p-5 min-[1480px]:grid-cols-2 min-[2180px]:grid-cols-3">
               {accounts.map((account) => (
                 <AccountCard key={account.id} account={account} />
               ))}
             </div>
-          </>
-        )}
+          )}
+        </section>
       </section>
-
-      <footer className="px-1 pb-3 text-xs text-[#6f7f94]">
-        Локальный Devin Dashboard для OmniRoute: добавить аккаунт, увидеть квоту, открыть нужную сессию.
-      </footer>
     </main>
   );
-}
-
-function readRepoAssignment(providerSpecificData: Record<string, unknown> | null) {
-  const dashboard = providerSpecificData?.devinDashboard;
-  if (!dashboard || typeof dashboard !== "object" || Array.isArray(dashboard)) {
-    return null;
-  }
-
-  const repoAssignment = (dashboard as Record<string, unknown>).repoAssignment;
-  if (!repoAssignment || typeof repoAssignment !== "object" || Array.isArray(repoAssignment)) {
-    return null;
-  }
-
-  const record = repoAssignment as Record<string, unknown>;
-  const fullName = typeof record.fullName === "string" && record.fullName.trim()
-    ? record.fullName.trim()
-    : typeof record.owner === "string" && typeof record.repo === "string"
-      ? `${record.owner.trim()}/${record.repo.trim()}`
-      : null;
-  const branch = typeof record.branch === "string" && record.branch.trim() ? record.branch.trim() : null;
-
-  if (!fullName) {
-    return null;
-  }
-
-  return {
-    fullName,
-    branch,
-  };
 }
 
 function StatCard({
@@ -176,11 +146,11 @@ function StatCard({
   accent: string;
 }) {
   return (
-    <div className="rounded-[18px] border border-white/10 bg-white/[0.04] px-3 py-3.5">
-      <div className="text-[10px] font-semibold uppercase tracking-[0.16em] text-[#7d8ba0]">
+    <div className="rounded-[14px] border border-[#27303d] bg-[#161c27] px-3 py-2.5">
+      <div className="text-[10px] font-semibold uppercase tracking-[0.16em] text-[#74859c]">
         {label}
       </div>
-      <div className={`mt-1.5 text-xl font-semibold ${accent}`}>{value}</div>
+      <div className={`mt-1 text-lg font-semibold ${accent}`}>{value}</div>
     </div>
   );
 }

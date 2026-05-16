@@ -80,10 +80,30 @@ function getDbPath(): string {
 }
 
 export async function listStoredAccounts(): Promise<StoredDevinAccount[]> {
-  const apiResult = await listStoredAccountsViaApi().catch(() => null);
-  const directResult = listStoredAccountsDirect();
-  if (apiResult && apiResult.length > 0) return apiResult;
-  return directResult;
+  try {
+    const apiAccounts = await listStoredAccountsViaApi();
+    if (apiAccounts.length > 0) {
+      return apiAccounts;
+    }
+
+    const directAccounts = listStoredAccountsDirectSafe(
+      "[connectionStore] OmniRoute API list returned zero devin-web rows; checking SQLite fallback.",
+    );
+    if (directAccounts && directAccounts.length > 0) {
+      return directAccounts;
+    }
+
+    return apiAccounts;
+  } catch (error) {
+    console.warn("[connectionStore] OmniRoute API list failed, falling back to SQLite:", error);
+    const directAccounts = listStoredAccountsDirectSafe(
+      "[connectionStore] OmniRoute API list failed and SQLite fallback is the only remaining source.",
+    );
+    if (directAccounts) {
+      return directAccounts;
+    }
+    throw error;
+  }
 }
 
 export async function getStoredAccount(
@@ -222,6 +242,15 @@ function listStoredAccountsDirect(): StoredDevinAccount[] {
     `SELECT * FROM provider_connections WHERE provider = 'devin-web' ORDER BY priority ASC, updated_at DESC`,
   );
   return rows.map(normalize);
+}
+
+function listStoredAccountsDirectSafe(message: string): StoredDevinAccount[] | null {
+  try {
+    return listStoredAccountsDirect();
+  } catch (error) {
+    console.warn(message, error);
+    return null;
+  }
 }
 
 function saveAccountDirect(input: SaveAccountInput): { id: string } {

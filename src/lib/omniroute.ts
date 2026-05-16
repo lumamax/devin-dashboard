@@ -5,6 +5,13 @@
  * via `/api/accounts`.
  */
 
+export type PreparedRepoSummary = {
+  fullName: string;
+  branch: string | null;
+  sessionId: string | null;
+  updatedAt: string | null;
+};
+
 export type AccountSummary = {
   id: string;
   name: string;
@@ -19,6 +26,7 @@ export type AccountSummary = {
   bearerPreview: string | null;
   assignedRepoFullName?: string | null;
   assignedBranch?: string | null;
+  preparedRepos?: PreparedRepoSummary[];
 };
 
 /**
@@ -31,9 +39,6 @@ export type DevinAccount = AccountSummary & {
 };
 
 export async function listDevinAccounts(): Promise<AccountSummary[]> {
-  // Server-only fetch using internal Next.js routing. We hit our own
-  // /api/accounts so all the OmniRoute-token wrangling stays in one
-  // place (connectionStore.ts).
   const url = `${process.env.DEVIN_DASHBOARD_INTERNAL_URL || "http://127.0.0.1:29128"}/api/accounts`;
   const res = await fetch(url, { cache: "no-store" }).catch(() => null);
   if (!res || !res.ok) {

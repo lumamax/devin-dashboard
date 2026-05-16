@@ -4,7 +4,11 @@
  * a real OmniRoute in this test env, the tests use a small fetch stub.
  */
 
+import { execFileSync } from "node:child_process";
 import { strict as assert } from "node:assert";
+import { mkdtempSync, rmSync } from "node:fs";
+import { tmpdir } from "node:os";
+import path from "node:path";
 import { test } from "node:test";
 
 const ORIG_FETCH = globalThis.fetch;
@@ -21,6 +25,16 @@ async function withMockedOmniroute<T>(
     return await body();
   } finally {
     globalThis.fetch = ORIG_FETCH;
+  }
+}
+
+async function withSilencedWarn<T>(body: () => Promise<T>): Promise<T> {
+  const originalWarn = console.warn;
+  console.warn = () => undefined;
+  try {
+    return await body();
+  } finally {
+    console.warn = originalWarn;
   }
 }
 
@@ -120,4 +134,94 @@ test("getEnv throws when OMNIROUTE_TOKEN is missing", async () => {
       }),
     /OMNIROUTE_TOKEN/
   );
+});
+
+
+test("listStoredAccounts returns the empty API result when SQLite fallback is unavailable", async () => {
+  process.env.OMNIROUTE_TOKEN = "test-token";
+  process.env.OMNIROUTE_URL = "http://omniroute.test";
+  process.env.OMNIROUTE_DB_PATH = "/nonexistent/path/that/should/never/be/touched.sqlite";
+  const mod = await import("../src/lib/connectionStore.ts");
+  const result = await withSilencedWarn(() =>
+    withMockedOmniroute(
+      () =>
+        new Response(JSON.stringify({ connections: [] }), {
+          status: 200,
+          headers: { "content-type": "application/json" },
+        }),
+      async () => mod.listStoredAccounts()
+    )
+  );
+  assert.deepEqual(result, [], "empty API result should pass through if SQLite cannot be read");
+  delete process.env.OMNIROUTE_DB_PATH;
+});
+
+test("listStoredAccounts falls back to SQLite when the API returns zero devin-web rows", async (t) => {
+  try {
+    execFileSync("sqlite3", ["--version"], { encoding: "utf8" });
+  } catch {
+    t.skip("sqlite3 CLI is unavailable in this environment");
+    return;
+  }
+
+  const tempDir = mkdtempSync(path.join(tmpdir(), "devin-dashboard-"));
+  const dbPath = path.join(tempDir, "storage.sqlite");
+
+  try {
+    execFileSync(
+      "sqlite3",
+      [
+        dbPath,
+        `
+        CREATE TABLE provider_connections (
+          id TEXT PRIMARY KEY,
+          provider TEXT,
+          name TEXT,
+          priority INTEGER,
+          test_status TEXT,
+          api_key TEXT,
+          provider_specific_data TEXT,
+          created_at TEXT,
+          updated_at TEXT
+        );
+        INSERT INTO provider_connections (
+          id, provider, name, priority, test_status, api_key, provider_specific_data, created_at, updated_at
+        ) VALUES (
+          'sqlite-devin-1',
+          'devin-web',
+          'SQLite Devin',
+          51,
+          'valid',
+          '{"version":1,"kind":"devin-web-creds","cookie":"wos-session=sqlite","bearer":"sqlite-bearer","orgId":"sqlite-org"}',
+          '{"devinDashboard":{"repoAssignment":{"fullName":"lumamax/devin-dashboard","branch":"main"}}}',
+          '2026-05-16T00:00:00.000Z',
+          '2026-05-16T00:00:00.000Z'
+        );
+        `,
+      ],
+      { encoding: "utf8" }
+    );
+
+    process.env.OMNIROUTE_TOKEN = "test-token";
+    process.env.OMNIROUTE_URL = "http://omniroute.test";
+    process.env.OMNIROUTE_DB_PATH = dbPath;
+
+    const mod = await import("../src/lib/connectionStore.ts");
+    const result = await withMockedOmniroute(
+      () =>
+        new Response(JSON.stringify({ connections: [] }), {
+          status: 200,
+          headers: { "content-type": "application/json" },
+        }),
+      async () => mod.listStoredAccounts()
+    );
+
+    assert.equal(result.length, 1);
+    assert.equal(result[0].id, "sqlite-devin-1");
+    assert.equal(result[0].name, "SQLite Devin");
+    assert.equal(result[0].creds?.orgId, "sqlite-org");
+  } finally {
+    delete process.env.OMNIROUTE_DB_PATH;
+    rmSync(tempDir, { recursive: true, force: true });
+  }
 });

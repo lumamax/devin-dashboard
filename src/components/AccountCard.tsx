@@ -3,11 +3,15 @@
 import { useEffect, useState, type ReactNode } from "react";
 import {
   ACTIVE_REPO_EVENT,
+  ACTIVE_REPO_MODEL_EVENT,
+  DEFAULT_ACTIVE_REPO_MODEL,
   formatActiveRepoLabel,
-  getActiveRepoSelection,
+  getActiveRepoModel,
+  getActiveRepoSelections,
+  type ActiveRepoModel,
   type ActiveRepoSelection,
 } from "@/lib/activeRepo";
-import type { AccountSummary } from "@/lib/omniroute";
+import type { AccountSummary, PreparedRepoSummary } from "@/lib/omniroute";
 
 type Status = "idle" | "launching" | "connecting" | "success" | "warning" | "error";
 
@@ -28,20 +32,19 @@ type QuotaResponse = {
 type ConnectRepoResponse = {
   ok: boolean;
   error?: string;
-  prompt?: string;
+  code?: string;
   assignment?: {
     owner?: string;
     repo?: string;
     branch?: string;
     fullName?: string;
   };
-  autoSeed?: {
-    attempted?: boolean;
-    ok?: boolean;
-    reason?: string | null;
-    action?: string | null;
-    pageUrl?: string | null;
-  };
+  preparedRepo?: {
+    fullName?: string;
+    branch?: string | null;
+    sessionId?: string | null;
+    updatedAt?: string | null;
+  } | null;
   startedSession?: {
     sessionId?: string | null;
     username?: string | null;
@@ -52,10 +55,7 @@ type ConnectRepoResponse = {
     status?: number | null;
     detail?: string | null;
   } | null;
-  launched?: {
-    pid?: number;
-    url?: string;
-  };
+  sessionAction?: "created" | "reused" | "already-prepared" | null;
 };
 
 type SessionLatestStatus = {
@@ -177,18 +177,9 @@ type BootstrapAssistState =
   | { kind: "idle" }
   | {
       kind: "ready";
-      prompt: string;
       repoLabel: string;
       branch: string;
-      copied: boolean;
-      launchUrl: string | null;
-      autoSeed: {
-        attempted: boolean;
-        ok: boolean;
-        reason: string | null;
-        action: string | null;
-        pageUrl: string | null;
-      };
+      sessionAction: "created" | "reused" | "already-prepared";
       sessionId: string | null;
     };
 
@@ -196,9 +187,11 @@ export function AccountCard({ account }: { account: AccountSummary }) {
   const [status, setStatus] = useState<Status>("idle");
   const [statusMessage, setStatusMessage] = useState<string | null>(null);
   const [quota, setQuota] = useState<QuotaState>({ kind: "idle" });
-  const [activeRepo, setActiveRepo] = useState<ActiveRepoSelection | null>(null);
+  const [selectedRepos, setSelectedRepos] = useState<ActiveRepoSelection[]>([]);
+  const [selectedModel, setSelectedModel] = useState<ActiveRepoModel>(DEFAULT_ACTIVE_REPO_MODEL);
   const [assignedRepoFullName, setAssignedRepoFullName] = useState(account.assignedRepoFullName || null);
   const [assignedBranch, setAssignedBranch] = useState(account.assignedBranch || null);
+  const [preparedRepos, setPreparedRepos] = useState<PreparedRepoSummary[]>(account.preparedRepos || []);
   const [sessionsOpen, setSessionsOpen] = useState(false);
   const [sessionsState, setSessionsState] = useState<SessionListState>({ kind: "idle" });
   const [selectedSessionId, setSelectedSessionId] = useState<string | null>(null);
@@ -208,7 +201,8 @@ export function AccountCard({ account }: { account: AccountSummary }) {
   useEffect(() => {
     setAssignedRepoFullName(account.assignedRepoFullName || null);
     setAssignedBranch(account.assignedBranch || null);
-  }, [account.assignedBranch, account.assignedRepoFullName]);
+    setPreparedRepos(account.preparedRepos || []);
+  }, [account.assignedBranch, account.assignedRepoFullName, account.preparedRepos]);
 
   useEffect(() => {
     setSessionsOpen(false);
@@ -219,26 +213,38 @@ export function AccountCard({ account }: { account: AccountSummary }) {
   }, [account.id]);
 
   useEffect(() => {
-    const syncActiveRepo = () => {
-      setActiveRepo(getActiveRepoSelection());
+    const syncActiveState = () => {
+      setSelectedRepos(getActiveRepoSelections());
+      setSelectedModel(getActiveRepoModel());
     };
 
     const handleActiveRepo = (event: Event) => {
-      const detail = (event as CustomEvent<ActiveRepoSelection>).detail;
-      if (detail) {
-        setActiveRepo(detail);
+      const detail = (event as CustomEvent<ActiveRepoSelection[]>).detail;
+      if (Array.isArray(detail)) {
+        setSelectedRepos(detail);
         return;
       }
-      syncActiveRepo();
+      syncActiveState();
     };
 
-    syncActiveRepo();
+    const handleActiveModel = (event: Event) => {
+      const detail = (event as CustomEvent<ActiveRepoModel>).detail;
+      if (detail && typeof detail === "object") {
+        setSelectedModel(detail);
+        return;
+      }
+      syncActiveState();
+    };
+
+    syncActiveState();
     window.addEventListener(ACTIVE_REPO_EVENT, handleActiveRepo as EventListener);
-    window.addEventListener("storage", syncActiveRepo);
+    window.addEventListener(ACTIVE_REPO_MODEL_EVENT, handleActiveModel as EventListener);
+    window.addEventListener("storage", syncActiveState);
 
     return () => {
       window.removeEventListener(ACTIVE_REPO_EVENT, handleActiveRepo as EventListener);
-      window.removeEventListener("storage", syncActiveRepo);
+      window.removeEventListener(ACTIVE_REPO_MODEL_EVENT, handleActiveModel as EventListener);
+      window.removeEventListener("storage", syncActiveState);
     };
   }, []);
 
@@ -283,15 +289,6 @@ export function AccountCard({ account }: { account: AccountSummary }) {
     };
   }, [account.id, account.hasCreds]);
 
-  async function copyPrompt(prompt: string) {
-    try {
-      await navigator.clipboard.writeText(prompt);
-      return true;
-    } catch {
-      return false;
-    }
-  }
-
   async function handleLaunch(options?: { url?: string; successMessage?: string }) {
     setStatus("launching");
     setStatusMessage(null);
@@ -314,18 +311,18 @@ export function AccountCard({ account }: { account: AccountSummary }) {
   }
 
   async function handleStart() {
-    const preferredUrl = selectedSessionId
-      ? buildSessionWebUrl(selectedSessionId)
-      : bootstrapAssist.kind === "ready"
-        ? bootstrapAssist.autoSeed.pageUrl || bootstrapAssist.launchUrl
+    const preferredPrepared = findPreferredPreparedSession(preparedRepos, selectedRepos);
+    const preferredUrl = bootstrapAssist.kind === "ready" && bootstrapAssist.sessionId
+      ? buildSessionWebUrl(bootstrapAssist.sessionId)
+      : preferredPrepared?.sessionId
+        ? buildSessionWebUrl(preferredPrepared.sessionId)
         : null;
 
     await handleLaunch({
       url: preferredUrl || undefined,
-      successMessage: selectedSessionId
-        ? "Открыл выбранную Devin-сессию."
-        : bootstrapAssist.kind === "ready"
-          ? "Открыл подготовленное окно Devin."
+      successMessage:
+        preferredPrepared?.sessionId || bootstrapAssist.kind === "ready"
+          ? "Открыл подготовленную Devin-сессию."
           : "Открыл аккаунт в Devin.",
     });
   }
@@ -456,21 +453,6 @@ export function AccountCard({ account }: { account: AccountSummary }) {
     await loadSessionFocus(sessionId);
   }
 
-  async function handleCopyBootstrapPrompt() {
-    if (bootstrapAssist.kind !== "ready") return;
-
-    const copied = await copyPrompt(bootstrapAssist.prompt);
-    setBootstrapAssist((current) =>
-      current.kind === "ready" ? { ...current, copied } : current,
-    );
-    setStatus(copied ? "success" : "warning");
-    setStatusMessage(
-      copied
-        ? "Prompt скопирован. Если Devin не получил его автоматически, просто открой сессию и вставь его вручную."
-        : "Clipboard не сработал. Prompt уже показан ниже, его можно вставить вручную.",
-    );
-  }
-
   async function handleConnectRepo() {
     if (!account.hasCreds) {
       setStatus("error");
@@ -478,9 +460,14 @@ export function AccountCard({ account }: { account: AccountSummary }) {
       return;
     }
 
-    if (!activeRepo) {
-      setStatus("error");
-      setStatusMessage("Сначала выбери рабочее репо в верхнем блоке.");
+    const nextRepo = nextPendingRepo;
+    if (!nextRepo) {
+      setStatus("warning");
+      setStatusMessage(
+        selectedRepos.length === 0
+          ? "Сначала выбери хотя бы один repo в верхнем блоке."
+          : "Для этого аккаунта все выбранные repo уже прошиты.",
+      );
       return;
     }
 
@@ -491,58 +478,44 @@ export function AccountCard({ account }: { account: AccountSummary }) {
       const res = await fetch(`/api/accounts/${account.id}/connect-repo`, {
         method: "POST",
         headers: { "Content-Type": "application/json" },
-        body: JSON.stringify(activeRepo),
+        body: JSON.stringify({
+          ...nextRepo,
+          modelOverride: selectedModel.id,
+        }),
       });
       const json = (await res.json()) as ConnectRepoResponse;
       if (!res.ok || !json.ok) {
-        throw new Error(json.error || `HTTP ${res.status}`);
+        throw new Error(json.error || describeBackendStartError(json.backendStartError || null) || `HTTP ${res.status}`);
       }
 
-      const fullName = json.assignment?.fullName || formatActiveRepoLabel(activeRepo);
-      const nextBranch = json.assignment?.branch || activeRepo.branch;
-      const copied = json.prompt ? await copyPrompt(json.prompt) : false;
-      const autoSeed = {
-        attempted: json.autoSeed?.attempted === true,
-        ok: json.autoSeed?.ok === true,
-        reason: json.autoSeed?.reason || null,
-        action: json.autoSeed?.action || null,
-        pageUrl: json.autoSeed?.pageUrl || null,
+      const fullName = json.assignment?.fullName || formatActiveRepoLabel(nextRepo);
+      const nextBranch = json.assignment?.branch || nextRepo.branch;
+      const preparedRepo = {
+        fullName: json.preparedRepo?.fullName || fullName,
+        branch: json.preparedRepo?.branch || nextBranch,
+        sessionId: json.preparedRepo?.sessionId || json.startedSession?.sessionId || null,
+        updatedAt: json.preparedRepo?.updatedAt || new Date().toISOString(),
       };
-      const autoSeedReasonText = describeAutoSeedReason(autoSeed.reason, autoSeed.attempted);
-      const backendStartErrorText = describeBackendStartError(json.backendStartError || null);
+      const sessionAction =
+        json.sessionAction === "reused"
+          ? "reused"
+          : json.sessionAction === "already-prepared"
+            ? "already-prepared"
+            : "created";
 
       setAssignedRepoFullName(fullName);
       setAssignedBranch(nextBranch);
-      setBootstrapAssist(
-        json.prompt
-          ? {
-              kind: "ready",
-              prompt: json.prompt,
-              repoLabel: fullName,
-              branch: nextBranch,
-              copied,
-              launchUrl: json.launched?.url || null,
-              autoSeed,
-              sessionId: json.startedSession?.sessionId || null,
-            }
-          : { kind: "idle" },
-      );
-      setStatus(autoSeed.ok ? "success" : "warning");
-      setStatusMessage(
-        autoSeed.ok
-          ? json.startedSession?.sessionId
-            ? `Создал новую Devin-сессию для ${fullName} и сразу отправил туда prompt.`
-            : `Репо ${fullName} прошито. Devin получил prompt. Теперь открой сессию и проверь, что он действительно начал git clone.`
-          : backendStartErrorText
-            ? `Репо ${fullName} закреплено, но новую Devin-сессию запустить не получилось: ${backendStartErrorText}.`
-            : `Репо ${fullName} закреплено, но prompt пока не подтверждён в чате${autoSeedReasonText ? `: ${autoSeedReasonText}` : ""}. Если Devin ничего не показал, вставь prompt из блока ниже вручную.`,
-      );
+      setPreparedRepos((current) => upsertPreparedRepo(current, preparedRepo));
+      setBootstrapAssist({
+        kind: "ready",
+        repoLabel: fullName,
+        branch: nextBranch,
+        sessionAction,
+        sessionId: json.startedSession?.sessionId || preparedRepo.sessionId || null,
+      });
+      setStatus("success");
+      setStatusMessage(buildAttachStatusMessage(sessionAction, fullName));
 
-      setSessionsOpen(true);
-      void loadSessions(true);
-      globalThis.setTimeout(() => {
-        void loadSessions(true);
-      }, 2500);
     } catch (err: unknown) {
       setStatus("error");
       setStatusMessage(err instanceof Error ? err.message : "Unknown error");
@@ -552,216 +525,148 @@ export function AccountCard({ account }: { account: AccountSummary }) {
   const displayName = account.name?.trim() || account.id || "Unnamed Devin account";
   const helperText = account.lastError
     ? account.lastError
-    : account.hasCreds
-      ? "Сессия сохранена. Можно открыть профиль отдельно или сразу запустить его с рабочим репо."
-      : "Для живой квоты и надёжного запуска лучше заново добавить этот аккаунт через кнопку сверху.";
+    : !account.hasCreds
+      ? "Нужно заново перелинковать аккаунт."
+      : null;
   const quotaSummary =
     quota.kind === "ready" ? buildQuotaSummary(quota.usage, quota.status, quota.models) : null;
-  const selectedSession = selectedSessionId ? sessionFocus[selectedSessionId] : null;
-  const canSeedRepo = account.hasCreds && Boolean(activeRepo);
+  const pendingRepos = getPendingRepos(selectedRepos, preparedRepos);
+  const nextPendingRepo = pendingRepos[0] || null;
+  const canSeedRepo = account.hasCreds && pendingRepos.length > 0;
+  const isConnectButtonActive = canSeedRepo && status !== "launching" && status !== "connecting";
+  const preparedRepoLabels = preparedRepos.map((repo) => repo.fullName).filter(Boolean);
+  const planLabel = quotaSummary?.planName ? humanize(quotaSummary.planName) : null;
+  const actionHint = bootstrapAssist.kind === "ready"
+    ? bootstrapAssist.sessionId
+      ? `${bootstrapAssist.repoLabel} · ${shrinkId(bootstrapAssist.sessionId, 6)}`
+      : `${bootstrapAssist.repoLabel} готов`
+    : nextPendingRepo
+      ? `${formatActiveRepoLabel(nextPendingRepo)} · ${selectedModel.label}`
+      : selectedRepos.length > 0
+        ? "Все выбранные repo уже готовы"
+        : "Сначала выбери repo";
 
   return (
-    <article className="grid gap-2.5 px-4 py-3 transition hover:bg-white/[0.02] xl:grid-cols-[minmax(280px,1.08fr)_minmax(330px,1fr)_minmax(236px,0.72fr)_180px] xl:items-center xl:gap-4 xl:px-5">
-      <div className="min-w-0">
-        <div className="flex flex-wrap items-center gap-2">
-          <h3 className="truncate text-sm font-semibold text-white sm:text-[15px]">{displayName}</h3>
-          <StatusBadge testStatus={account.testStatus} rateLimitedUntil={account.rateLimitedUntil} />
-          {!account.hasCreds ? <InlineBadge tone="warn">нужно перелинковать</InlineBadge> : null}
-          {account.lastError ? <InlineBadge tone="danger">есть ошибка</InlineBadge> : null}
-        </div>
+    <article className="rounded-[20px] border border-[#1f2835] bg-[linear-gradient(180deg,rgba(15,19,27,0.96),rgba(9,12,18,0.98))] p-3.5 shadow-[0_16px_34px_rgba(0,0,0,0.24)] transition hover:border-[#2b3646]">
+      <div className="grid gap-3 xl:grid-cols-[minmax(0,1fr)_248px] xl:items-start">
+        <div className="min-w-0 space-y-3">
+          <div className="flex flex-wrap items-start justify-between gap-3">
+            <div className="min-w-0">
+              <div className="flex flex-wrap items-center gap-2">
+                <h3 className="truncate text-[15px] font-semibold text-white sm:text-base">{displayName}</h3>
+                <StatusBadge testStatus={account.testStatus} rateLimitedUntil={account.rateLimitedUntil} />
+                {!account.hasCreds ? <InlineBadge tone="warn">перелинк</InlineBadge> : null}
+                {account.lastError ? <InlineBadge tone="danger">ошибка</InlineBadge> : null}
+              </div>
 
-        <div className="mt-2 flex flex-wrap gap-2 text-[11px] text-[#9fb0c5]">
-          {account.updatedAt ? <MetaPill label="updated" value={formatDate(account.updatedAt)} /> : null}
-        </div>
-
-        <p
-          className={`mt-2 max-w-xl text-[12px] leading-5 ${
-            account.lastError ? "text-[#d7a3a3]" : "text-[#8ea0b6]"
-          } ${account.hasCreds && !account.lastError ? "xl:hidden" : ""}`}
-        >
-          {helperText}
-        </p>
-      </div>
-
-      <div className="space-y-2 xl:pr-1">
-        <SectionLabel>Session</SectionLabel>
-        <div className="rounded-[14px] border border-white/8 bg-white/[0.03] p-2.5 text-[11px] text-[#c7d3e0]">
-          <MetaLine label="Сессия" value={account.hasCreds ? "Готова" : "Нужно войти снова"} />
-          <MetaLine label="Репо" value={assignedRepoFullName || "ещё не закреплено"} mono />
-          <MetaLine label="Branch" value={assignedBranch || "по выбранному репо"} mono />
-        </div>
-
-        {assignedRepoFullName ? (
-          <p className="text-[11px] leading-5 text-[#7f91a8]">
-            Пока Devin не выполнил команды из prompt и не сделал `git clone`, код внутри его VM ещё не появился.
-          </p>
-        ) : null}
-
-        {quotaSummary && (quotaSummary.planName || quotaSummary.models.length > 0) ? (
-          <div className="space-y-1.5">
-            <div className="text-[10px] font-semibold uppercase tracking-[0.18em] text-[#71819a]">
-              План и режимы
+              <div className="mt-2 flex flex-wrap gap-1.5 text-[11px] text-[#9fb0c5]">
+                {account.updatedAt ? <MetaPill label="updated" value={formatDate(account.updatedAt)} /> : null}
+                {planLabel ? <MetaPill label="plan" value={planLabel} /> : null}
+              </div>
             </div>
-            <div className="flex flex-wrap gap-1.5">
-              {quotaSummary.planName ? (
-                <InlineBadge tone="neutral">План {humanize(quotaSummary.planName)}</InlineBadge>
+          </div>
+
+          <div className="rounded-[16px] border border-[#1f2835] bg-[#111722] px-3 py-3">
+            <div className="flex flex-wrap items-start justify-between gap-3">
+              <div className="min-w-0 flex-1">
+                <div className="text-[10px] font-semibold uppercase tracking-[0.18em] text-[#73839b]">
+                  Подцеплено
+                </div>
+                {preparedRepoLabels.length > 0 ? (
+                  <div className="mt-2 flex flex-wrap gap-1.5">
+                    {preparedRepoLabels.map((label) => (
+                      <span
+                        key={label}
+                        className="rounded-full border border-[#293444] bg-[#18202c] px-2.5 py-1 text-[11px] text-[#dbe6f2]"
+                      >
+                        {label}
+                      </span>
+                    ))}
+                  </div>
+                ) : (
+                  <div className="mt-2 text-[12px] leading-5 text-[#7f91a8]">Пока ничего не подцеплено</div>
+                )}
+              </div>
+
+              {preparedRepoLabels.length > 0 && quotaSummary?.models.length ? (
+                <div className="flex max-w-[46%] flex-wrap justify-end gap-1 text-[10px]">
+                  {quotaSummary.models.map((model) => (
+                    <span
+                      key={model.id}
+                      className="rounded-full border border-[#293444] bg-transparent px-2 py-0.5 text-[10px] text-[#aebbd0]"
+                    >
+                      {model.label}
+                    </span>
+                  ))}
+                </div>
               ) : null}
-              {quotaSummary.models.map((model) => (
-                <InlineBadge key={model.id} tone="neutral">
-                  {model.label}
-                </InlineBadge>
-              ))}
-            </div>
-          </div>
-        ) : null}
-
-        {account.hasCreds ? (
-          <div className="rounded-[14px] border border-white/8 bg-white/[0.03] p-2.5 text-[11px] text-[#c7d3e0]">
-            <div className="flex items-center justify-between gap-2">
-              <div className="text-[10px] font-semibold uppercase tracking-[0.16em] text-[#71819a]">
-                Recent sessions
-              </div>
-              <div className="flex items-center gap-2">
-                {sessionsOpen && sessionsState.kind === "ready" ? (
-                  <button
-                    type="button"
-                    onClick={() => void loadSessions(true)}
-                    className="text-[10px] font-semibold uppercase tracking-[0.14em] text-[#92b7ff] transition hover:text-white"
-                  >
-                    Обновить
-                  </button>
-                ) : null}
-                <button
-                  type="button"
-                  onClick={() => void toggleSessions()}
-                  className="text-[10px] font-semibold uppercase tracking-[0.14em] text-[#92b7ff] transition hover:text-white"
-                >
-                  {sessionsOpen ? "Скрыть" : "Показать"}
-                </button>
-              </div>
             </div>
 
-            {sessionsOpen ? (
-              <SessionInspector
-                state={sessionsState}
-                selectedSessionId={selectedSessionId}
-                focus={selectedSession}
-                onSelectSession={handleSelectSession}
-                onOpenSession={handleOpenSession}
-              />
-            ) : (
-              <div className="mt-2 text-[11px] leading-5 text-[#8394aa]">
-                Последние Devin-сессии этого аккаунта и краткая сводка по выбранной сессии.
+            {helperText ? (
+              <div className={`mt-2 text-[12px] leading-5 ${account.lastError ? "text-[#d7a3a3]" : "text-[#8ea0b6]"}`}>
+                {helperText}
               </div>
-            )}
+            ) : null}
           </div>
-        ) : null}
-      </div>
-
-      <div className="xl:w-full xl:max-w-[236px] xl:justify-self-end">
-        <SectionLabel>Quota</SectionLabel>
-        <QuotaPanel state={quota} />
-      </div>
-
-      <div className="flex flex-col items-start gap-2 xl:items-end">
-        <div className="flex w-full flex-col gap-2 sm:w-auto xl:items-end">
-          <button
-            type="button"
-            onClick={handleConnectRepo}
-            disabled={!canSeedRepo || status === "launching" || status === "connecting"}
-            className="inline-flex min-w-[160px] items-center justify-center rounded-full border border-emerald-400/20 bg-emerald-400 px-4 py-2.5 text-sm font-semibold text-slate-950 transition hover:bg-emerald-300 disabled:cursor-not-allowed disabled:opacity-50"
-          >
-            {status === "connecting" ? "Прошиваю…" : "Прошить репо"}
-          </button>
-          <button
-            type="button"
-            onClick={handleStart}
-            disabled={status === "launching" || status === "connecting"}
-            className="inline-flex min-w-[160px] items-center justify-center rounded-full border border-white/12 bg-white/[0.04] px-4 py-2.5 text-sm font-semibold text-[#e6eef8] transition hover:bg-white/[0.08] disabled:cursor-not-allowed disabled:opacity-50"
-          >
-            {status === "launching" ? "Открываю…" : "Старт"}
-          </button>
         </div>
-        <p className="max-w-[220px] text-right text-[11px] leading-5 text-[#7e8ea5]">
-          {bootstrapAssist.kind === "ready"
-            ? bootstrapAssist.sessionId
-              ? `Последняя прошивка создала одну новую Devin-сессию: ${shrinkId(bootstrapAssist.sessionId, 6)}`
-              : `Последняя прошивка: ${bootstrapAssist.repoLabel}`
-            : canSeedRepo
-              ? `Прошивка создаст одну новую Devin-сессию для ${formatActiveRepoLabel(activeRepo!)}`
-              : activeRepo
-                ? `Выбрано: ${formatActiveRepoLabel(activeRepo)}`
-                : "Сначала выбери рабочее репо сверху"}
-        </p>
+
+        <div className="space-y-2.5">
+          <QuotaPanel state={quota} />
+
+          <div className="rounded-[16px] border border-[#1f2835] bg-[#111722] p-2.5">
+            <div className="grid grid-cols-2 gap-2">
+              <button
+                type="button"
+                onClick={handleConnectRepo}
+                disabled={!canSeedRepo || status === "launching" || status === "connecting"}
+                className={`inline-flex min-h-[44px] items-center justify-center rounded-full border px-4 py-2.5 text-sm font-semibold transition disabled:cursor-not-allowed disabled:opacity-60 ${
+                  isConnectButtonActive
+                    ? "border-emerald-400/20 bg-emerald-400 text-slate-950 hover:bg-emerald-300"
+                    : "border-[#2a3340] bg-[#1a212d] text-[#dbe7f4]"
+                }`}
+              >
+                {status === "connecting"
+                  ? "Прошиваю…"
+                  : canSeedRepo
+                    ? "Прошить repo"
+                    : selectedRepos.length > 0
+                      ? "Уже прошито"
+                      : "Выбери repo"}
+              </button>
+              <button
+                type="button"
+                onClick={handleStart}
+                disabled={status === "launching" || status === "connecting"}
+                className="inline-flex min-h-[44px] items-center justify-center rounded-full border border-[#c5d0de]/45 bg-[#202833] px-4 py-2.5 text-sm font-semibold text-[#f2f6fc] transition hover:bg-[#283240] disabled:cursor-not-allowed disabled:opacity-50"
+              >
+                {status === "launching" ? "Открываю…" : "Старт"}
+              </button>
+            </div>
+            <p className="mt-2 px-1 text-[11px] leading-5 text-[#7e8ea5]">{actionHint}</p>
+          </div>
+        </div>
       </div>
 
       {bootstrapAssist.kind === "ready" ? (
-        <div
-          className={`rounded-[16px] border px-3 py-3 text-xs xl:col-span-4 ${
-            bootstrapAssist.autoSeed.ok
-              ? "border-emerald-400/20 bg-emerald-400/10 text-emerald-100"
-              : "border-amber-300/20 bg-amber-300/10 text-amber-50"
-          }`}
-        >
-          <div className="flex flex-col gap-3 lg:flex-row lg:items-start lg:justify-between">
-            <div className="min-w-0">
-              <div className="flex flex-wrap items-center gap-2 text-[11px]">
-                <InlineBadge tone={bootstrapAssist.autoSeed.ok ? "ok" : "warn"}>
-                  {bootstrapAssist.autoSeed.ok ? "prompt отправлен" : "нужна проверка"}
-                </InlineBadge>
-                <InlineBadge tone="neutral">{bootstrapAssist.repoLabel}</InlineBadge>
-                <InlineBadge tone="neutral">{bootstrapAssist.branch}</InlineBadge>
-              </div>
-              <p className="mt-2 max-w-3xl text-[12px] leading-5 opacity-90">
-                {bootstrapAssist.autoSeed.ok
-                  ? bootstrapAssist.sessionId
-                    ? "Создана одна новая Devin-сессия этого аккаунта, и стартовый prompt ушёл сразу в неё. Остальные старые сессии аккаунта это не трогает."
-                    : "Devin получил стартовый prompt. Теперь важно только проверить, что в чате пошли команды clone/open и агент реально увидел репозиторий."
-                  : `Автоподача prompt не подтверждена${describeAutoSeedReason(bootstrapAssist.autoSeed.reason, bootstrapAssist.autoSeed.attempted) ? `: ${describeAutoSeedReason(bootstrapAssist.autoSeed.reason, bootstrapAssist.autoSeed.attempted)}` : ""}. Нажми «Старт», открой Devin и при необходимости вставь prompt вручную.`}
-              </p>
-            </div>
-
-            <div className="flex flex-wrap gap-2">
-              <button
-                type="button"
-                onClick={() => void handleCopyBootstrapPrompt()}
-                className="rounded-full border border-white/12 bg-white/[0.08] px-3 py-1.5 text-[11px] font-semibold text-white transition hover:bg-white/[0.12]"
-              >
-                {bootstrapAssist.copied ? "Скопировать ещё раз" : "Скопировать prompt"}
-              </button>
-              {bootstrapAssist.autoSeed.pageUrl || bootstrapAssist.launchUrl ? (
-                <button
-                  type="button"
-                  onClick={() =>
-                    void handleLaunch({
-                      url: bootstrapAssist.autoSeed.pageUrl || bootstrapAssist.launchUrl || undefined,
-                      successMessage: "Открыл окно Devin для этой прошивки.",
-                    })
-                  }
-                  className="rounded-full border border-white/12 bg-white/[0.04] px-3 py-1.5 text-[11px] font-semibold text-white transition hover:bg-white/[0.08]"
-                >
-                  Открыть Devin
-                </button>
-              ) : null}
-            </div>
-          </div>
-
-          {!bootstrapAssist.autoSeed.ok ? (
-            <details className="mt-3 rounded-[12px] border border-black/10 bg-black/10 px-3 py-2 text-[11px] text-[#fff8e6]">
-              <summary className="cursor-pointer font-semibold text-[#fff3c2]">
-                Prompt для ручной вставки
-              </summary>
-              <pre className="mt-2 overflow-x-auto whitespace-pre-wrap font-mono text-[11px] leading-5 text-[#fff8e6]">
-                {bootstrapAssist.prompt}
-              </pre>
-            </details>
+        <div className="mt-2 flex flex-wrap items-center gap-1.5 rounded-[14px] border border-emerald-400/16 bg-emerald-400/8 px-3 py-2 text-[11px] text-emerald-100">
+          <InlineBadge tone="ok">
+            {bootstrapAssist.sessionAction === "reused"
+              ? "живая сессия"
+              : bootstrapAssist.sessionAction === "already-prepared"
+                ? "уже прошито"
+                : "repo прошит"}
+          </InlineBadge>
+          <InlineBadge tone="neutral">{bootstrapAssist.repoLabel}</InlineBadge>
+          <InlineBadge tone="neutral">{bootstrapAssist.branch}</InlineBadge>
+          {bootstrapAssist.sessionId ? (
+            <InlineBadge tone="neutral">{shrinkId(bootstrapAssist.sessionId, 6)}</InlineBadge>
           ) : null}
         </div>
       ) : null}
 
       {statusMessage ? (
         <div
-          className={`rounded-[16px] border px-3 py-2.5 text-xs xl:col-span-4 ${
+          className={`mt-2 rounded-[14px] border px-3 py-2.5 text-xs ${
             status === "error"
               ? "border-rose-400/30 bg-rose-400/10 text-rose-200"
               : status === "warning"
@@ -957,8 +862,11 @@ function QuotaPanel({ state }: { state: QuotaState }) {
   }
 
   return (
-    <div className="rounded-[14px] border border-white/10 bg-[linear-gradient(180deg,rgba(255,255,255,0.045),rgba(255,255,255,0.03))] p-2 shadow-[inset_0_1px_0_rgba(255,255,255,0.03)]">
-      <div className="space-y-1.5">
+    <div className="rounded-[16px] border border-[#1f2835] bg-[linear-gradient(180deg,rgba(28,34,43,0.78),rgba(18,24,31,0.9))] p-2.5 shadow-[inset_0_1px_0_rgba(255,255,255,0.02)]">
+      <div className="mb-2 text-[10px] font-semibold uppercase tracking-[0.18em] text-[#71819a]">
+        Квота
+      </div>
+      <div className="space-y-2">
         {summary.dailyPercentage !== null ? (
           <QuotaBar
             label="Daily"
@@ -1047,18 +955,20 @@ function QuotaBar({
   const width = `${clamped}%`;
 
   return (
-    <div className="space-y-1">
-      <div className="flex items-center justify-between gap-3 text-[10px]">
-        <span className="font-semibold uppercase tracking-[0.16em] text-[#8fa4bd]">{label}</span>
-        <span className={`font-semibold ${tone.text}`}>{Math.round(clamped)}%</span>
+    <div className="space-y-1.5">
+      <div className="flex items-center justify-between gap-3 text-[11px]">
+        <div className="min-w-0">
+          <div className="font-semibold uppercase tracking-[0.16em] text-[#8fa4bd]">{label}</div>
+          <div className="truncate text-[10px] text-[#8293aa]">{detail}</div>
+        </div>
+        <span className={`shrink-0 font-semibold ${tone.text}`}>{Math.round(clamped)}%</span>
       </div>
-      <div className={`h-1.5 overflow-hidden rounded-full border ${tone.track}`}>
+      <div className={`h-2 overflow-hidden rounded-full border ${tone.track}`}>
         <div
           className={`h-full rounded-full transition-all duration-300 ${tone.fill}`}
           style={{ width }}
         />
       </div>
-      <div className="text-[10px] text-[#8293aa]">{detail}</div>
     </div>
   );
 }
@@ -1194,22 +1104,65 @@ function shrinkId(value: string, size: number): string {
 
 function buildSessionWebUrl(devinId: string): string {
   const normalized = devinId.replace(/^devin-/, "");
-  return `https://app.devin.ai/sessions/${normalized}?tab=README.md`;
+  return `https://app.devin.ai/sessions/${normalized}`;
 }
 
 function humanize(value: string): string {
   return value.replace(/[_-]+/g, " ");
 }
 
-function describeAutoSeedReason(reason: string | null, attempted: boolean): string | null {
-  if (reason === "no_seat_allocated") return "у аккаунта сейчас нет seat для запуска";
-  if (reason === "repository_selection_required") return "Devin просит сначала выбрать репозитории";
-  if (reason === "send_button_not_found") return "кнопка отправки пока не появилась";
-  if (reason === "opened_composer") return "Devin только открыл composer, но ещё не отправил сообщение";
-  if (reason === "composer_not_found") return "поле ввода в Devin пока не нашлось";
-  if (reason === "debug_port_unavailable") return "браузер открылся без debug-порта, поэтому автоподача не стартовала";
-  if (attempted) return "автоподача не добилась подтверждённой отправки";
-  return null;
+function buildAttachStatusMessage(
+  action: "created" | "reused" | "already-prepared",
+  repoLabel: string,
+): string {
+  if (action === "reused") {
+    return `Для ${repoLabel} уже была подходящая живая Devin-сессия. Повторно prompt не отправлял.`;
+  }
+  if (action === "already-prepared") {
+    return `${repoLabel} уже прошит для этого аккаунта. Повторная прошивка не нужна.`;
+  }
+  return `Создал новую backend-сессию для ${repoLabel}. Она должна только сделать clone/check access и остановиться.`;
+}
+
+function buildAttachPanelMessage(action: "created" | "reused" | "already-prepared"): string {
+  if (action === "reused") {
+    return "Новая сессия не создавалась: для этого repo уже есть подходящая живая Devin-сессия.";
+  }
+  if (action === "already-prepared") {
+    return "Этот repo уже был прошит раньше, поэтому тот же самый attach повторно не отправлялся.";
+  }
+  return "Backend Devin принял новую attach-only сессию. Дальше можно открыть её через «Старт» и проверить, что repo действительно появился локально.";
+}
+
+function getPendingRepos(
+  selectedRepos: ActiveRepoSelection[],
+  preparedRepos: PreparedRepoSummary[],
+): ActiveRepoSelection[] {
+  const prepared = new Set(preparedRepos.map((repo) => repo.fullName.toLowerCase()));
+  return selectedRepos.filter((repo) => !prepared.has(formatActiveRepoLabel(repo).toLowerCase()));
+}
+
+function upsertPreparedRepo(
+  current: PreparedRepoSummary[],
+  next: PreparedRepoSummary,
+): PreparedRepoSummary[] {
+  const key = next.fullName.toLowerCase();
+  const filtered = current.filter((repo) => repo.fullName.toLowerCase() !== key);
+  return [next, ...filtered];
+}
+
+function findPreferredPreparedSession(
+  preparedRepos: PreparedRepoSummary[],
+  selectedRepos: ActiveRepoSelection[],
+): PreparedRepoSummary | null {
+  for (const selected of selectedRepos) {
+    const match = preparedRepos.find(
+      (repo) => repo.fullName.toLowerCase() === formatActiveRepoLabel(selected).toLowerCase() && repo.sessionId,
+    );
+    if (match) return match;
+  }
+
+  return preparedRepos.find((repo) => repo.sessionId) || null;
 }
 
 function describeBackendStartError(

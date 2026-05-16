@@ -1,6 +1,12 @@
 "use client";
 
 import { useEffect, useState } from "react";
+import {
+  ACTIVE_REPO_EVENT,
+  formatActiveRepoLabel,
+  getActiveRepoSelections,
+  type ActiveRepoSelection,
+} from "@/lib/activeRepo";
 
 type ScoredAccount = {
   accountId: string;
@@ -33,14 +39,42 @@ type PanelState =
 
 export function PickBestAccountPanel() {
   const [state, setState] = useState<PanelState>({ kind: "idle" });
-  const [targetRepo, setTargetRepo] = useState("");
+  const [selectedRepos, setSelectedRepos] = useState<ActiveRepoSelection[]>([]);
   const [expanded, setExpanded] = useState(false);
 
-  async function fetchRanking() {
+  useEffect(() => {
+    const syncRepos = () => {
+      setSelectedRepos(getActiveRepoSelections());
+    };
+
+    const handleRepoSelection = (event: Event) => {
+      const detail = (event as CustomEvent<ActiveRepoSelection[]>).detail;
+      if (Array.isArray(detail)) {
+        setSelectedRepos(detail);
+        return;
+      }
+      syncRepos();
+    };
+
+    syncRepos();
+    window.addEventListener(ACTIVE_REPO_EVENT, handleRepoSelection as EventListener);
+    window.addEventListener("storage", syncRepos);
+
+    return () => {
+      window.removeEventListener(ACTIVE_REPO_EVENT, handleRepoSelection as EventListener);
+      window.removeEventListener("storage", syncRepos);
+    };
+  }, []);
+
+  useEffect(() => {
+    void fetchRanking(selectedRepos[0] ? formatActiveRepoLabel(selectedRepos[0]) : null);
+  }, [selectedRepos]);
+
+  async function fetchRanking(targetRepo: string | null) {
     setState({ kind: "loading" });
     try {
       const params = new URLSearchParams();
-      if (targetRepo.trim()) params.set("targetRepo", targetRepo.trim());
+      if (targetRepo) params.set("targetRepo", targetRepo);
       const res = await fetch(`/api/accounts/pick-best?${params.toString()}`, {
         cache: "no-store",
       });
@@ -57,42 +91,40 @@ export function PickBestAccountPanel() {
     }
   }
 
-  useEffect(() => {
-    void fetchRanking();
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, []);
+  const targetRepoLabel = selectedRepos[0] ? formatActiveRepoLabel(selectedRepos[0]) : null;
 
   return (
-    <section className="overflow-hidden rounded-[24px] border border-white/10 bg-[rgba(11,14,20,0.88)] shadow-[0_24px_60px_rgba(0,0,0,0.35)] backdrop-blur">
-      <div className="flex flex-col gap-3 border-b border-white/10 px-4 py-4 sm:px-5 lg:flex-row lg:items-center lg:justify-between">
+    <section className="overflow-hidden rounded-[22px] border border-white/10 bg-[rgba(11,14,20,0.88)] shadow-[0_20px_55px_rgba(0,0,0,0.35)] backdrop-blur">
+      <div className="flex items-start justify-between gap-3 p-4">
         <div>
-          <h2 className="text-lg font-semibold text-white">Pick best account</h2>
-          <p className="mt-1 text-sm text-[#93a0b2]">
-            Score accounts by quota headroom, lifecycle state, and repo readiness.
+          <div className="mb-2 text-[10px] font-semibold uppercase tracking-[0.16em] text-[#8596ad]">
+            Маршрутизация
+          </div>
+          <h2 className="text-base font-semibold text-white">Лучший аккаунт</h2>
+          <p className="mt-1 text-sm leading-6 text-[#93a0b2]">
+            Быстрая подсказка, куда лучше отправлять следующий repo.
           </p>
         </div>
-        <div className="flex flex-wrap items-center gap-2">
-          <input
-            type="text"
-            value={targetRepo}
-            onChange={(e) => setTargetRepo(e.target.value)}
-            placeholder="owner/repo (optional)"
-            className="h-8 rounded-lg border border-white/10 bg-white/5 px-3 text-xs text-white placeholder:text-[#6b7a8e] focus:border-indigo-400/40 focus:outline-none"
-          />
-          <button
-            onClick={() => void fetchRanking()}
-            disabled={state.kind === "loading"}
-            className="h-8 rounded-lg border border-indigo-400/30 bg-indigo-500/20 px-4 text-xs font-semibold text-indigo-200 transition hover:bg-indigo-500/30 disabled:opacity-50"
-          >
-            {state.kind === "loading" ? "Scoring\u2026" : "Score"}
-          </button>
-        </div>
+        <button
+          onClick={() => void fetchRanking(targetRepoLabel)}
+          disabled={state.kind === "loading"}
+          className="inline-flex items-center justify-center rounded-full border border-white/12 bg-white/[0.04] px-3.5 py-2 text-xs font-semibold text-[#e6eef8] transition hover:bg-white/[0.08] disabled:opacity-50"
+        >
+          {state.kind === "loading" ? "Считаю…" : "Обновить"}
+        </button>
       </div>
 
-      <div className="px-4 py-4 sm:px-5">
+      <div className="border-t border-white/8 px-4 py-4">
+        <div className="mb-3 flex flex-wrap items-center gap-2 text-xs text-[#8ea0b6]">
+          <span>Текущий ориентир:</span>
+          <span className="rounded-full border border-white/10 bg-white/[0.04] px-2.5 py-1 text-[#dce6f1]">
+            {targetRepoLabel || "без фильтра по repo"}
+          </span>
+        </div>
+
         {state.kind === "idle" || state.kind === "loading" ? (
           <div className="text-sm text-[#8ea0b6]">
-            {state.kind === "loading" ? "Fetching quota data and scoring accounts\u2026" : "Click Score to rank accounts."}
+            {state.kind === "loading" ? "Собираю квоту и сравниваю аккаунты…" : "Жду первый расчёт."}
           </div>
         ) : state.kind === "error" ? (
           <div className="rounded-[14px] border border-rose-400/20 bg-rose-400/10 px-4 py-3 text-sm text-rose-200">
@@ -118,22 +150,18 @@ function RankingResult({
   const { best, ranked } = data;
 
   return (
-    <div className="space-y-4">
+    <div className="space-y-3">
       {best ? (
-        <div className="flex items-center gap-3 rounded-[18px] border border-emerald-400/20 bg-emerald-400/10 px-4 py-3">
-          <div className="flex h-9 w-9 items-center justify-center rounded-full border border-emerald-400/30 bg-emerald-400/15 text-sm font-bold text-emerald-200">
-            1
+        <div className="rounded-[18px] border border-emerald-400/20 bg-emerald-400/10 px-4 py-3">
+          <div className="text-[11px] font-semibold uppercase tracking-[0.18em] text-emerald-200/85">
+            Рекомендация
           </div>
-          <div className="min-w-0 flex-1">
-            <div className="text-sm font-semibold text-emerald-100">{best.name}</div>
-            <div className="text-xs text-emerald-300/70">
-              Score {best.score}/100 &mdash; best available account for the next task
-            </div>
-          </div>
+          <div className="mt-1 text-base font-semibold text-emerald-50">{best.name}</div>
+          <div className="mt-1 text-sm text-emerald-200/75">Score {best.score}/100</div>
         </div>
       ) : (
         <div className="rounded-[14px] border border-amber-400/20 bg-amber-400/10 px-4 py-3 text-sm text-amber-200">
-          No qualified account found. All accounts are either exhausted, rate-limited, or need re-linking.
+          Сейчас нет квалифицированного аккаунта: все exhausted, rate-limited или требуют relink.
         </div>
       )}
 
@@ -141,16 +169,16 @@ function RankingResult({
         onClick={onToggleExpand}
         className="text-xs font-semibold text-[#8fa4bd] transition hover:text-white"
       >
-        {expanded ? "Hide full ranking \u25B2" : `Show full ranking (${ranked.length} accounts) \u25BC`}
+        {expanded ? "Скрыть полный рейтинг" : `Показать полный рейтинг (${ranked.length})`}
       </button>
 
-      {expanded && (
+      {expanded ? (
         <div className="space-y-1.5">
           {ranked.map((account, index) => (
             <RankedAccountRow key={account.accountId} account={account} rank={index + 1} />
           ))}
         </div>
-      )}
+      ) : null}
     </div>
   );
 }
@@ -160,7 +188,7 @@ function RankedAccountRow({ account, rank }: { account: ScoredAccount; rank: num
 
   return (
     <div
-      className={`grid grid-cols-[32px_1fr_auto] items-center gap-3 rounded-[14px] border px-3 py-2.5 ${
+      className={`grid grid-cols-[28px_minmax(0,1fr)_auto] items-center gap-3 rounded-[14px] border px-3 py-2.5 ${
         account.disqualified
           ? "border-white/5 bg-white/[0.02] opacity-50"
           : "border-white/8 bg-white/[0.03]"
@@ -177,28 +205,19 @@ function RankedAccountRow({ account, rank }: { account: ScoredAccount; rank: num
             {account.lifecycle}
           </span>
         </div>
-        <div className="mt-0.5 flex flex-wrap gap-3 text-[10px] text-[#8293aa]">
-          <span>Q: {account.quotaScore}</span>
-          <span>L: {account.lifecycleScore}</span>
-          <span>R: {account.repoScore}</span>
-          {account.dailyPercentage !== null && (
-            <span>Daily: {Math.round(account.dailyPercentage)}%</span>
-          )}
-          {account.weeklyPercentage !== null && (
-            <span>Weekly: {Math.round(account.weeklyPercentage)}%</span>
-          )}
-          {account.assignedRepoFullName && (
-            <span>Repo: {account.assignedRepoFullName}</span>
-          )}
+        <div className="mt-0.5 flex flex-wrap gap-2 text-[10px] text-[#8293aa]">
+          <span>Q {account.quotaScore}</span>
+          <span>L {account.lifecycleScore}</span>
+          <span>R {account.repoScore}</span>
+          {account.dailyPercentage !== null ? <span>Day {Math.round(account.dailyPercentage)}%</span> : null}
+          {account.weeklyPercentage !== null ? <span>Week {Math.round(account.weeklyPercentage)}%</span> : null}
         </div>
-        {account.disqualifyReason && (
+        {account.disqualifyReason ? (
           <div className="mt-0.5 text-[10px] text-rose-300/70">{account.disqualifyReason}</div>
-        )}
+        ) : null}
       </div>
 
-      <div className="text-right text-sm font-semibold text-[#aab5c4]">
-        {account.score}
-      </div>
+      <div className="text-right text-sm font-semibold text-[#aab5c4]">{account.score}</div>
     </div>
   );
 }

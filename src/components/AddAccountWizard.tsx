@@ -167,46 +167,39 @@ export function AddAccountWizard() {
   }
 
   return (
-    <section className="relative rounded-[24px] border border-white/10 bg-[linear-gradient(180deg,rgba(14,18,25,0.96),rgba(9,12,18,0.92))] shadow-[0_20px_60px_rgba(0,0,0,0.32)] backdrop-blur">
-      <div className="flex flex-col gap-4 p-5 lg:flex-row lg:items-start lg:justify-between lg:p-6">
-        <div className="min-w-0 max-w-3xl">
-          <div className="mb-2 flex flex-wrap gap-2 text-[10px] font-semibold uppercase tracking-[0.16em] text-[#8596ad]">
-            <span className="rounded-full border border-white/10 bg-white/[0.04] px-3 py-1 text-[#dce6f1]">
-              Devin dashboard
+    <section className="relative overflow-hidden rounded-[20px] border border-[#1e2734] bg-[linear-gradient(180deg,rgba(13,17,24,0.98),rgba(8,11,17,0.94))] shadow-[0_18px_46px_rgba(0,0,0,0.32)] backdrop-blur">
+      <div className="p-4">
+        <div className="min-w-0">
+          <div className="mb-2 flex flex-wrap items-center gap-2 text-[10px] font-semibold uppercase tracking-[0.16em] text-[#8596ad]">
+            <span className="rounded-full border border-[#2a3341] bg-[#171d28] px-3 py-1 text-[#dce6f1]">
+              Аккаунты
             </span>
             <span className="rounded-full border border-emerald-400/20 bg-emerald-400/10 px-3 py-1 text-emerald-200">
-              Автоподхват сессии
+              Chrome
             </span>
           </div>
 
-          <div className="flex flex-wrap items-center gap-3">
-            <h2 className="text-lg font-semibold text-white sm:text-[1.2rem]">Добавить аккаунт</h2>
-            <details className="group relative">
-              <summary className="list-none cursor-pointer rounded-full border border-white/10 bg-white/[0.04] px-3 py-1.5 text-xs font-semibold text-[#d7e2ef] transition hover:bg-white/[0.08]">
+          <div className="flex flex-wrap items-center justify-between gap-3">
+            <div>
+              <h2 className="text-base font-semibold text-white">Добавить Devin</h2>
+              <p className="mt-1 text-sm leading-6 text-[#95a3b6]">Новое окно или быстрый импорт.</p>
+            </div>
+            <details className="group w-full sm:w-auto">
+              <summary className="list-none cursor-pointer rounded-full border border-[#2a3341] bg-[#171d28] px-3 py-1.5 text-xs font-semibold text-[#d7e2ef] transition hover:bg-[#1c2330]">
                 Как это работает
               </summary>
-              <div className="mt-3 w-full rounded-[20px] border border-white/10 bg-[#0d131b]/95 p-4 text-sm text-[#c7d3e0] shadow-[0_22px_50px_rgba(0,0,0,0.45)] lg:absolute lg:left-0 lg:top-full lg:z-20 lg:mt-2 lg:w-[420px]">
-                <div className="space-y-2 leading-6">
-                  <div className="rounded-2xl border border-white/8 bg-white/[0.03] px-3 py-2">
-                    1. Нажми «Добавить аккаунт» и войди в Devin в новом окне Chrome.
-                  </div>
-                  <div className="rounded-2xl border border-white/8 bg-white/[0.03] px-3 py-2">
-                    2. После логина сессия сама сохранится в локальный список.
-                  </div>
-                  <div className="rounded-2xl border border-white/8 bg-white/[0.03] px-3 py-2">
-                    3. Если Devin уже открыт в обычном Chrome, можно просто нажать «Импорт из Chrome».
-                  </div>
+              <div className="mt-3 rounded-[16px] border border-[#26303d] bg-[#111722] p-3 text-sm text-[#c7d3e0] shadow-[0_18px_40px_rgba(0,0,0,0.35)] sm:w-[360px]">
+                <div className="space-y-2 leading-6 text-[#c7d3e0]">
+                  <div>1. Открой новый вход через «Добавить Devin».</div>
+                  <div>2. После логина аккаунт сам появится в списке.</div>
+                  <div>3. Если Devin уже открыт, используй импорт из Chrome.</div>
                 </div>
               </div>
             </details>
           </div>
-
-          <p className="mt-2 max-w-2xl text-sm leading-6 text-[#95a3b6]">
-            Быстрый вход через чистое окно или импорт уже открытых Devin-сессий из Chrome.
-          </p>
         </div>
 
-        <div className="flex flex-col gap-2 sm:flex-row lg:justify-end">
+        <div className="mt-4 grid gap-3">
           {state.status === "idle" ||
           state.status === "error" ||
           state.status === "done" ||
@@ -215,23 +208,23 @@ export function AddAccountWizard() {
               <button
                 type="button"
                 onClick={importFromChrome}
-                className="inline-flex min-w-[178px] items-center justify-center rounded-full border border-white/12 bg-white px-5 py-3 text-sm font-semibold text-slate-900 transition hover:bg-[#eef4fb]"
+                className="inline-flex min-h-[54px] items-center justify-center rounded-[16px] border border-[#2f3947] bg-[#1c2430] px-4 py-3 text-base font-semibold text-[#eef4fb] transition hover:bg-[#232c3a]"
               >
                 Импорт из Chrome
               </button>
               <button
                 type="button"
                 onClick={start}
-                className="inline-flex min-w-[196px] items-center justify-center rounded-full border border-emerald-400/20 bg-emerald-400 px-5 py-3 text-sm font-semibold text-slate-950 transition hover:bg-emerald-300"
+                className="inline-flex min-h-[56px] items-center justify-center rounded-[16px] border border-emerald-400/20 bg-emerald-400 px-4 py-3 text-base font-semibold text-slate-950 transition hover:bg-emerald-300"
               >
-                {state.status === "done" ? "Добавить ещё" : "Добавить аккаунт"}
+                {state.status === "done" ? "Добавить ещё" : "Добавить Devin"}
               </button>
             </>
           ) : (
             <button
               type="button"
               onClick={reset}
-              className="inline-flex min-w-[164px] items-center justify-center rounded-full border border-white/12 bg-white/[0.04] px-5 py-3 text-sm font-semibold text-[#e5edf8] transition hover:bg-white/[0.08]"
+              className="inline-flex min-h-[54px] items-center justify-center rounded-[16px] border border-[#2a3340] bg-[#171d28] px-4 py-3 text-base font-semibold text-[#e5edf8] transition hover:bg-[#1d2431]"
             >
               Отмена
             </button>
@@ -239,7 +232,7 @@ export function AddAccountWizard() {
         </div>
       </div>
 
-      <div className="border-t border-white/8 px-5 py-4 lg:px-6">
+      <div className="border-t border-white/6 px-4 py-3.5">
         <Body state={state} />
       </div>
     </section>
@@ -249,8 +242,8 @@ export function AddAccountWizard() {
 function Body({ state }: { state: CaptureStatus }) {
   if (state.status === "idle") {
     return (
-      <div className="rounded-[18px] border border-dashed border-white/12 bg-white/[0.03] px-4 py-3 text-sm text-[#94a4b7]">
-        Новый вход откроет отдельное окно Chrome. Импорт просто подтянет уже активные Devin-сессии.
+      <div className="rounded-[16px] border border-dashed border-[#27303d] bg-[#111722] px-4 py-3 text-sm text-[#94a4b7]">
+        Импорт подтянет уже открытые Devin-сессии. Новый вход откроет отдельное окно Chrome.
       </div>
     );
   }
@@ -263,18 +256,18 @@ function Body({ state }: { state: CaptureStatus }) {
   if (state.status === "pending") {
     return (
       <Note tone="info" title="Жду вход">
-        Окно Chrome уже открыто. Войди в Devin, и после успешного логина аккаунт сам появится в списке.
+        Окно уже открыто. Войди в Devin, и аккаунт сам появится в списке.
       </Note>
     );
   }
   if (state.status === "captured") {
-    return <Note tone="ok" title="Сессию поймал">Всё хорошо, сохраняю аккаунт в локальный список.</Note>;
+    return <Note tone="ok" title="Сессию поймал">Сохраняю аккаунт в локальный список.</Note>;
   }
   if (state.status === "saving") {
     return <Note tone="info" title="Сохраняю аккаунт">Добавляю «{state.name}» в дашборд…</Note>;
   }
   if (state.status === "done") {
-    return <Note tone="ok" title="Готово">Аккаунт сохранён и уже доступен в списке ниже.</Note>;
+    return <Note tone="ok" title="Готово">Аккаунт уже доступен в списке.</Note>;
   }
   if (state.status === "imported") {
     return <Note tone="ok" title="Импорт завершён">{state.message}</Note>;
@@ -299,10 +292,10 @@ function Note({
       ? "border border-rose-400/25 bg-rose-400/10 text-rose-100"
       : tone === "ok"
         ? "border border-emerald-400/20 bg-emerald-400/10 text-emerald-100"
-        : "border border-white/10 bg-black/15 text-[#d7e0ec]";
+        : "border border-[#27303d] bg-[#111722] text-[#d7e0ec]";
 
   return (
-    <div className={`rounded-[18px] px-4 py-3 text-sm ${cls}`}>
+    <div className={`rounded-[16px] px-4 py-3 text-sm ${cls}`}>
       <div className="mb-1.5 text-[11px] font-semibold uppercase tracking-[0.18em] opacity-80">
         {title}
       </div>

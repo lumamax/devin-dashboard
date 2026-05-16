@@ -1,12 +1,17 @@
 "use client";
 
-import { useEffect, useState, type ReactNode } from "react";
+import { useEffect, useMemo, useState, type ReactNode } from "react";
 import {
-  getActiveRepoSelection,
-  saveActiveRepoSelection,
+  ACTIVE_REPO_MODEL_OPTIONS,
+  DEFAULT_ACTIVE_REPO_MODEL,
+  formatActiveRepoLabel,
+  getActiveRepoModel,
+  getActiveRepoSelections,
+  saveActiveRepoModel,
+  saveActiveRepoSelections,
+  type ActiveRepoModel,
   type ActiveRepoSelection,
 } from "@/lib/activeRepo";
-import { buildCloudAgentPrompt } from "@/lib/bootstrapPrompt";
 
 type RepositoryOption = {
   id: number;
@@ -41,20 +46,6 @@ type GitHubStatusResponse = {
   }>;
 };
 
-type BootstrapResponse = {
-  ok: boolean;
-  error?: string;
-  prompt?: string;
-  bootstrap?: {
-    owner: string;
-    repo: string;
-    branch: string;
-    cloneUrl: string;
-    expiresAt: string;
-    commands: string[];
-  };
-};
-
 type StatusState =
   | { kind: "loading" }
   | { kind: "error"; error: string }
@@ -68,39 +59,21 @@ type StatusState =
       error: string | null;
     };
 
-type BootstrapState =
-  | { kind: "idle" }
-  | { kind: "loading" }
-  | { kind: "error"; error: string }
-  | {
-      kind: "ready";
-      owner: string;
-      repo: string;
-      branch: string;
-      cloneUrl: string;
-      expiresAt: string;
-      commands: string[];
-      prompt: string;
-    };
-
 export function RepoBootstrapPanel() {
   const [status, setStatus] = useState<StatusState>({ kind: "loading" });
-  const [owner, setOwner] = useState("");
-  const [repo, setRepo] = useState("");
-  const [branch, setBranch] = useState("main");
-  const [bootstrap, setBootstrap] = useState<BootstrapState>({ kind: "idle" });
-  const [copied, setCopied] = useState<string | null>(null);
+  const [selectedRepos, setSelectedRepos] = useState<ActiveRepoSelection[]>([]);
+  const [selectedModel, setSelectedModel] = useState<ActiveRepoModel>(DEFAULT_ACTIVE_REPO_MODEL);
 
   useEffect(() => {
+    setSelectedRepos(getActiveRepoSelections());
+    setSelectedModel(getActiveRepoModel());
     void loadStatus();
   }, []);
 
-  useEffect(() => {
-    const selection = normalizeSelection(owner, repo, branch);
-    if (selection) {
-      saveActiveRepoSelection(selection);
-    }
-  }, [owner, repo, branch]);
+  const selectedLabels = useMemo(
+    () => selectedRepos.map((repo) => formatActiveRepoLabel(repo)),
+    [selectedRepos],
+  );
 
   async function loadStatus() {
     setStatus({ kind: "loading" });
@@ -112,33 +85,21 @@ export function RepoBootstrapPanel() {
       }
 
       const repositories = normalizeRepositories(json.repositories);
-      const ownerHint = pickOwnerHint(json);
-      const firstRepo = repositories[0] || null;
-      const currentSelection = pickSelectableSelection(repositories, normalizeSelection(owner, repo, branch));
-      const savedSelection = pickSelectableSelection(repositories, getActiveRepoSelection());
-      const fallbackSelection = normalizeSelection(
-        firstRepo?.owner || ownerHint || "lumamax",
-        firstRepo?.repo || "devin-dashboard",
-        firstRepo?.defaultBranch || "main",
-      );
-      const nextSelection = currentSelection || savedSelection || fallbackSelection;
+      const savedSelection = pickSelectableSelections(repositories, getActiveRepoSelections());
+      const nextSelection =
+        savedSelection.length > 0 ? savedSelection : repositories.length === 1 ? [toSelection(repositories[0]!)] : [];
 
       setStatus({
         kind: "ready",
         configured: Boolean(json.configured),
-        ownerHint,
+        ownerHint: pickOwnerHint(json),
         appSlug: json.app?.slug || null,
         repositories,
         missing: json.missing || [],
         error: json.error || null,
       });
-
-      if (nextSelection) {
-        setOwner(nextSelection.owner);
-        setRepo(nextSelection.repo);
-        setBranch(nextSelection.branch);
-        saveActiveRepoSelection(nextSelection);
-      }
+      setSelectedRepos(nextSelection);
+      saveActiveRepoSelections(nextSelection);
     } catch (err) {
       setStatus({
         kind: "error",
@@ -147,115 +108,96 @@ export function RepoBootstrapPanel() {
     }
   }
 
-  async function handleBootstrap() {
-    const trimmedOwner = owner.trim();
-    const trimmedRepo = repo.trim();
-    const trimmedBranch = branch.trim() || "main";
+  function updateSelections(nextSelections: ActiveRepoSelection[]) {
+    setSelectedRepos(nextSelections);
+    saveActiveRepoSelections(nextSelections);
+  }
 
-    if (!trimmedOwner || !trimmedRepo) {
-      setBootstrap({ kind: "error", error: "Заполни owner и repo." });
+  function updateModel(nextModel: ActiveRepoModel) {
+    setSelectedModel(nextModel);
+    saveActiveRepoModel(nextModel);
+  }
+
+  function toggleRepository(option: RepositoryOption) {
+    const selection = toSelection(option);
+    const exists = selectedRepos.some(
+      (repo) => repo.owner === selection.owner && repo.repo === selection.repo,
+    );
+
+    if (exists) {
+      updateSelections(
+        selectedRepos.filter(
+          (repo) => !(repo.owner === selection.owner && repo.repo === selection.repo),
+        ),
+      );
       return;
     }
 
-    setBootstrap({ kind: "loading" });
-    try {
-      const res = await fetch("/api/github-app/bootstrap", {
-        method: "POST",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({
-          owner: trimmedOwner,
-          repo: trimmedRepo,
-          branch: trimmedBranch,
-        }),
-      });
-      const json = (await res.json()) as BootstrapResponse;
-      if (!res.ok || !json.ok || !json.bootstrap) {
-        throw new Error(json.error || `HTTP ${res.status}`);
-      }
-
-      setBootstrap({
-        kind: "ready",
-        owner: json.bootstrap.owner,
-        repo: json.bootstrap.repo,
-        branch: json.bootstrap.branch,
-        cloneUrl: json.bootstrap.cloneUrl,
-        expiresAt: json.bootstrap.expiresAt,
-        commands: json.bootstrap.commands,
-        prompt: json.prompt || buildCloudAgentPrompt(json.bootstrap),
-      });
-    } catch (err) {
-      setBootstrap({
-        kind: "error",
-        error: err instanceof Error ? err.message : "Не удалось подготовить доступ",
-      });
-    }
+    const next = sortSelectionsByRepositoryOrder([...selectedRepos, selection], getRepositories(status));
+    updateSelections(next);
   }
 
-  async function copyText(kind: string, value: string) {
-    try {
-      await navigator.clipboard.writeText(value);
-      setCopied(kind);
-      window.setTimeout(() => {
-        setCopied((current) => (current === kind ? null : current));
-      }, 1600);
-    } catch (err) {
-      setBootstrap({
-        kind: "error",
-        error: err instanceof Error ? err.message : "Не удалось скопировать текст",
-      });
-    }
+  function selectAll() {
+    const repositories = getRepositories(status);
+    updateSelections(repositories.map((repo) => toSelection(repo)));
   }
 
-  function selectRepository(option: RepositoryOption) {
-    setOwner(option.owner);
-    setRepo(option.repo);
-    setBranch(option.defaultBranch || "main");
-    setBootstrap({ kind: "idle" });
+  function clearAll() {
+    updateSelections([]);
   }
 
   return (
-    <section
-      id="repo-bootstrap"
-      className="overflow-hidden rounded-[24px] border border-white/10 bg-[linear-gradient(180deg,rgba(16,20,28,0.95),rgba(9,12,19,0.92))] shadow-[0_22px_60px_rgba(0,0,0,0.34)] backdrop-blur"
-    >
-      <div className="flex flex-col gap-4 p-5 lg:flex-row lg:items-start lg:justify-between lg:p-6">
-        <div className="max-w-3xl">
-          <div className="mb-2 flex flex-wrap gap-2 text-[10px] font-semibold uppercase tracking-[0.16em] text-[#8596ad]">
-            <span className="rounded-full border border-white/10 bg-white/[0.04] px-3 py-1 text-[#dce6f1]">
-              Рабочее репо
-            </span>
-            <span className="rounded-full border border-sky-400/20 bg-sky-400/10 px-3 py-1 text-sky-100">
-              GitHub App bootstrap
-            </span>
+    <section className="overflow-hidden rounded-[20px] border border-[#1e2734] bg-[linear-gradient(180deg,rgba(13,17,24,0.98),rgba(8,11,17,0.94))] shadow-[0_18px_46px_rgba(0,0,0,0.32)] backdrop-blur">
+      <div className="p-4">
+        <div className="flex items-start justify-between gap-3">
+          <div className="min-w-0">
+            <div className="mb-2 flex flex-wrap gap-2 text-[10px] font-semibold uppercase tracking-[0.16em] text-[#8596ad]">
+              <span className="rounded-full border border-[#2a3341] bg-[#171d28] px-3 py-1 text-[#dce6f1]">
+                Прошивка repo
+              </span>
+              {selectedRepos.length > 0 ? (
+                <span className="rounded-full border border-emerald-400/20 bg-emerald-400/10 px-3 py-1 text-emerald-100">
+                  выбрано {selectedRepos.length}
+                </span>
+              ) : null}
+            </div>
+            <h2 className="text-base font-semibold text-white">Репозитории</h2>
+            <p className="mt-1 text-sm leading-6 text-[#95a3b6]">Выбери, что прошивать в новые сессии.</p>
           </div>
-
-          <div className="flex flex-wrap items-center gap-3">
-            <h2 className="text-lg font-semibold text-white sm:text-[1.2rem]">Подключить Devin к приватному репо</h2>
-            <StatusChip state={status} />
-          </div>
-
-          <p className="mt-2 max-w-2xl text-sm leading-6 text-[#95a3b6]">
-            Выбери общее рабочее репо один раз, а потом запускай конкретный Devin-аккаунт ниже уже с готовым seed prompt. Старые GitHub-сессии переносить не нужно.
-          </p>
-
-          <p className="mt-2 text-xs leading-5 text-[#7f91a8]">
-            Это активное репо используют кнопки <b className="text-[#dce6f1]">«Прошить репо»</b> у аккаунтов ниже.
-          </p>
+          <StatusChip state={status} />
         </div>
 
-        <button
-          type="button"
-          onClick={() => void loadStatus()}
-          className="inline-flex min-w-[148px] items-center justify-center rounded-full border border-white/12 bg-white/[0.04] px-4 py-2.5 text-sm font-semibold text-[#e6eef8] transition hover:bg-white/[0.08]"
-        >
-          Обновить
-        </button>
+        <div className="mt-4 flex flex-wrap gap-2">
+          <button
+            type="button"
+            onClick={() => void loadStatus()}
+            className="inline-flex items-center justify-center rounded-full border border-[#2a3341] bg-[#171d28] px-3.5 py-2 text-xs font-semibold text-[#e6eef8] transition hover:bg-[#1d2431]"
+          >
+            Обновить
+          </button>
+          <button
+            type="button"
+            onClick={selectAll}
+            disabled={getRepositories(status).length === 0}
+            className="inline-flex items-center justify-center rounded-full border border-[#2a3341] bg-[#171d28] px-3.5 py-2 text-xs font-semibold text-[#e6eef8] transition hover:bg-[#1d2431] disabled:cursor-not-allowed disabled:opacity-50"
+          >
+            Все
+          </button>
+          <button
+            type="button"
+            onClick={clearAll}
+            disabled={selectedRepos.length === 0}
+            className="inline-flex items-center justify-center rounded-full border border-[#2a3341] bg-[#171d28] px-3.5 py-2 text-xs font-semibold text-[#e6eef8] transition hover:bg-[#1d2431] disabled:cursor-not-allowed disabled:opacity-50"
+          >
+            Очистить
+          </button>
+        </div>
       </div>
 
-      <div className="border-t border-white/8 px-5 py-4 lg:px-6">
+      <div className="border-t border-white/6 p-4">
         {status.kind === "loading" ? (
           <Notice tone="info" title="Проверяю GitHub App">
-            Смотрю, какие приватные репозитории уже доступны через локальный control plane.
+            Подтягиваю доступные репозитории.
           </Notice>
         ) : null}
 
@@ -273,182 +215,114 @@ export function RepoBootstrapPanel() {
 
         {status.kind === "ready" && status.configured ? (
           <div className="space-y-4">
-            <div className="grid gap-4 xl:grid-cols-[minmax(0,1.25fr)_minmax(360px,0.95fr)]">
-              <div className="rounded-[20px] border border-white/10 bg-white/[0.03] p-4">
-                <div className="mb-3 flex flex-wrap items-center gap-2 text-[11px] font-semibold uppercase tracking-[0.18em] text-[#7990ab]">
-                  <span>Доступные репозитории</span>
-                  {status.appSlug ? (
-                    <span className="rounded-full border border-white/10 bg-white/[0.04] px-2.5 py-1 normal-case tracking-normal text-[#d7e3f0]">
-                      {status.appSlug}
-                    </span>
-                  ) : null}
+            {status.repositories.length > 0 ? (
+              <>
+                <div className="space-y-2.5">
+                  {status.repositories.map((option) => {
+                    const checked = selectedRepos.some(
+                      (repo) => repo.owner === option.owner && repo.repo === option.repo,
+                    );
+                    return (
+                      <button
+                        key={option.id || option.fullName}
+                        type="button"
+                        onClick={() => toggleRepository(option)}
+                        className={`w-full rounded-[16px] border px-3.5 py-3 text-left transition ${
+                          checked
+                            ? "border-emerald-400/25 bg-emerald-400/12 shadow-[inset_0_1px_0_rgba(255,255,255,0.03)]"
+                            : "border-[#26303d] bg-[#111722] hover:border-[#314055] hover:bg-[#151c27]"
+                        }`}
+                      >
+                        <div className="flex items-start justify-between gap-3">
+                          <div className="min-w-0">
+                            <div className="truncate text-sm font-semibold text-white">{option.fullName}</div>
+                            <div className="mt-1 text-xs text-[#8fa0b5]">Branch {option.defaultBranch || "main"}</div>
+                          </div>
+                          <span
+                            className={`mt-0.5 inline-flex items-center rounded-full border px-2.5 py-1 text-[10px] font-semibold uppercase tracking-[0.14em] ${
+                              checked
+                                ? "border-emerald-400/20 bg-emerald-400/10 text-emerald-100"
+                                : "border-[#2b3544] bg-transparent text-[#9cb0c6]"
+                            }`}
+                          >
+                            {checked ? "в работе" : "доступен"}
+                          </span>
+                        </div>
+                      </button>
+                    );
+                  })}
                 </div>
 
-                {status.repositories.length > 0 ? (
-                  <div className="space-y-3">
-                    <div className="text-xs leading-5 text-[#8fa0b5]">
-                      {status.repositories.length === 1
-                        ? `Сейчас GitHub App видит только одно репо: ${status.repositories[0]?.fullName}. Именно оно и будет активным.`
-                        : `Сейчас GitHub App видит ${status.repositories.length} репо. Нажми нужное, и оно станет активным для кнопок ниже.`}
+                <div className="rounded-[16px] border border-[#202835] bg-[#111722] p-3.5">
+                  <div className="mb-2 flex items-center justify-between gap-2">
+                    <div className="text-[11px] font-semibold uppercase tracking-[0.18em] text-[#7990ab]">
+                      Новая сессия
                     </div>
-                    <div className="flex flex-wrap gap-2">
-                    {status.repositories.map((option) => {
-                      const active = option.owner === owner.trim() && option.repo === repo.trim();
+                    <span className="rounded-full border border-emerald-400/20 bg-emerald-400/10 px-2.5 py-1 text-[10px] font-semibold text-emerald-100">
+                      {selectedModel.label}
+                    </span>
+                  </div>
+                  <div className="grid grid-cols-2 gap-2">
+                    {ACTIVE_REPO_MODEL_OPTIONS.map((option) => {
+                      const active = option.id === selectedModel.id;
                       return (
                         <button
-                          key={option.id || option.fullName}
+                          key={option.id}
                           type="button"
-                          onClick={() => selectRepository(option)}
-                          className={`rounded-full border px-3 py-2 text-sm transition ${
+                          onClick={() => updateModel(option)}
+                          className={`rounded-[14px] border px-3 py-2 text-left text-sm transition ${
                             active
-                              ? "border-emerald-400/25 bg-emerald-400/12 text-emerald-100"
-                              : "border-white/10 bg-white/[0.04] text-[#d6e0ed] hover:bg-white/[0.08]"
+                              ? "border-emerald-400/25 bg-emerald-400/12 text-white"
+                              : "border-[#26303d] bg-[#171d28] text-[#b8c6d8] hover:border-[#314055] hover:bg-[#1b2230]"
                           }`}
                         >
-                          {option.fullName}
+                          {option.label}
                         </button>
                       );
                     })}
-                    </div>
                   </div>
-                ) : (
-                  <div className="rounded-[16px] border border-dashed border-white/10 bg-black/15 px-4 py-3 text-sm text-[#8fa0b5]">
-                    В списке пока пусто, но owner и repo можно вписать вручную.
-                  </div>
-                )}
-              </div>
-
-              <div className="rounded-[20px] border border-white/10 bg-white/[0.03] p-4">
-                <div className="mb-3 text-[11px] font-semibold uppercase tracking-[0.18em] text-[#7990ab]">
-                  Подготовить доступ
-                </div>
-                <div className="grid gap-3 sm:grid-cols-3">
-                  <label className="space-y-1.5 text-sm text-[#dce6f2]">
-                    <span className="text-[11px] uppercase tracking-[0.16em] text-[#7f91a8]">Owner</span>
-                    <input
-                      value={owner}
-                      onChange={(event) => setOwner(event.target.value)}
-                      className="w-full rounded-[14px] border border-white/10 bg-black/20 px-3 py-2.5 text-sm text-white outline-none transition focus:border-emerald-400/30"
-                      placeholder="lumamax"
-                    />
-                  </label>
-                  <label className="space-y-1.5 text-sm text-[#dce6f2]">
-                    <span className="text-[11px] uppercase tracking-[0.16em] text-[#7f91a8]">Repo</span>
-                    <input
-                      value={repo}
-                      onChange={(event) => setRepo(event.target.value)}
-                      className="w-full rounded-[14px] border border-white/10 bg-black/20 px-3 py-2.5 text-sm text-white outline-none transition focus:border-emerald-400/30"
-                      placeholder="devin-dashboard"
-                    />
-                  </label>
-                  <label className="space-y-1.5 text-sm text-[#dce6f2]">
-                    <span className="text-[11px] uppercase tracking-[0.16em] text-[#7f91a8]">Branch</span>
-                    <input
-                      value={branch}
-                      onChange={(event) => setBranch(event.target.value)}
-                      className="w-full rounded-[14px] border border-white/10 bg-black/20 px-3 py-2.5 text-sm text-white outline-none transition focus:border-emerald-400/30"
-                      placeholder="main"
-                    />
-                  </label>
                 </div>
 
-                <div className="mt-3 flex flex-wrap items-center gap-2 text-xs text-[#8193aa]">
-                  <span className="rounded-full border border-white/10 bg-white/[0.04] px-2.5 py-1 uppercase tracking-[0.14em] text-[#7f91a8]">
-                    Активное репо
-                  </span>
-                  <span className="rounded-full border border-emerald-400/20 bg-emerald-400/10 px-3 py-1 font-mono text-emerald-100">
-                    {owner.trim() || "owner"}/{repo.trim() || "repo"}
-                  </span>
-                  <span className="rounded-full border border-white/10 bg-white/[0.04] px-3 py-1 font-mono text-[#d6e0ed]">
-                    {branch.trim() || "main"}
-                  </span>
-                </div>
-
-                <div className="mt-3 flex flex-wrap items-center gap-3">
-                  <button
-                    type="button"
-                    onClick={handleBootstrap}
-                    disabled={bootstrap.kind === "loading"}
-                    className="inline-flex min-w-[188px] items-center justify-center rounded-full border border-emerald-400/20 bg-emerald-400 px-5 py-3 text-sm font-semibold text-slate-950 transition hover:bg-emerald-300 disabled:cursor-not-allowed disabled:opacity-60"
-                  >
-                    {bootstrap.kind === "loading" ? "Готовлю…" : "Подготовить для Devin"}
-                  </button>
-                  <span className="text-xs leading-5 text-[#8193aa]">
-                    На выходе будет короткоживущий git-доступ именно под это репо.
-                  </span>
-                </div>
-              </div>
-            </div>
-
-            {status.error ? (
-              <Notice tone="info" title="Подсказка">
-                {status.error}
-              </Notice>
-            ) : null}
-
-            {bootstrap.kind === "error" ? (
-              <Notice tone="error" title="Не получилось подготовить доступ">
-                {bootstrap.error}
-              </Notice>
-            ) : null}
-
-            {bootstrap.kind === "ready" ? (
-              <div className="grid gap-4 xl:grid-cols-[minmax(0,0.92fr)_minmax(0,1.08fr)]">
-                <div className="space-y-4 rounded-[20px] border border-white/10 bg-[linear-gradient(180deg,rgba(255,255,255,0.04),rgba(255,255,255,0.025))] p-4">
-                  <div className="flex flex-wrap gap-2 text-xs text-[#dbe6f2]">
-                    <MetaPill label="repo" value={`${bootstrap.owner}/${bootstrap.repo}`} />
-                    <MetaPill label="branch" value={bootstrap.branch} />
-                    <MetaPill label="expires" value={formatExpiry(bootstrap.expiresAt)} />
-                  </div>
-
-                  <div>
+                {selectedLabels.length > 0 ? (
+                  <div className="rounded-[16px] border border-[#202835] bg-[#111722] px-3.5 py-3 text-sm text-[#8fa0b5]">
                     <div className="mb-2 text-[11px] font-semibold uppercase tracking-[0.18em] text-[#7990ab]">
-                      Git-команды
+                      Очередь прошивки
                     </div>
-                    <pre className="overflow-x-auto rounded-[16px] border border-white/10 bg-[#0b1118] px-4 py-3 text-[12px] leading-6 text-[#dbe7f3]">
-                      {bootstrap.commands.join("\n")}
-                    </pre>
-                  </div>
-
-                  <div className="flex flex-wrap gap-2">
-                    <CopyButton
-                      label={copied === "commands" ? "Скопировано" : "Скопировать команды"}
-                      onClick={() => void copyText("commands", bootstrap.commands.join("\n"))}
-                    />
-                    <CopyButton
-                      label={copied === "clone" ? "Скопировано" : "Скопировать clone"}
-                      onClick={() => void copyText("clone", bootstrap.cloneUrl)}
-                    />
-                  </div>
-                </div>
-
-                <div className="space-y-3 rounded-[20px] border border-white/10 bg-white/[0.03] p-4">
-                  <div className="flex flex-wrap items-center justify-between gap-3">
-                    <div>
-                      <div className="text-[11px] font-semibold uppercase tracking-[0.18em] text-[#7990ab]">
-                        Prompt для нового Devin
-                      </div>
-                      <p className="mt-1 text-sm text-[#91a2b8]">
-                        Это уже можно целиком вставлять в новую cloud-сессию.
-                      </p>
+                    <div className="flex flex-wrap gap-1.5">
+                      {selectedLabels.map((label) => (
+                        <span
+                          key={label}
+                          className="rounded-full border border-emerald-400/20 bg-emerald-400/10 px-2.5 py-1 text-[11px] font-medium text-emerald-100"
+                        >
+                          {label}
+                        </span>
+                      ))}
                     </div>
-                    <CopyButton
-                      label={copied === "prompt" ? "Скопировано" : "Скопировать prompt"}
-                      onClick={() => void copyText("prompt", bootstrap.prompt)}
-                    />
                   </div>
-
-                  <pre className="max-h-[360px] overflow-auto whitespace-pre-wrap rounded-[16px] border border-white/10 bg-[#0b1118] px-4 py-3 text-[12px] leading-6 text-[#dbe7f3]">
-                    {bootstrap.prompt}
-                  </pre>
-                </div>
+                ) : null}
+              </>
+            ) : (
+              <div className="rounded-[16px] border border-dashed border-[#2a3340] bg-[#111722] px-4 py-3 text-sm text-[#8fa0b5]">
+                Репозиториев пока нет.
               </div>
-            ) : null}
+            )}
           </div>
         ) : null}
       </div>
     </section>
   );
+}
+
+function getRepositories(state: StatusState): RepositoryOption[] {
+  return state.kind === "ready" ? state.repositories : [];
+}
+
+function toSelection(option: RepositoryOption): ActiveRepoSelection {
+  return {
+    owner: option.owner,
+    repo: option.repo,
+    branch: option.defaultBranch || "main",
+  };
 }
 
 function normalizeRepositories(input: GitHubStatusResponse["repositories"]): RepositoryOption[] {
@@ -476,92 +350,49 @@ function normalizeRepositories(input: GitHubStatusResponse["repositories"]): Rep
   return out;
 }
 
-function normalizeSelection(
-  owner: string | null | undefined,
-  repo: string | null | undefined,
-  branch: string | null | undefined,
-): ActiveRepoSelection | null {
-  const trimmedOwner = owner?.trim() || "";
-  const trimmedRepo = repo?.trim() || "";
-  const trimmedBranch = branch?.trim() || "main";
+function pickSelectableSelections(
+  repositories: RepositoryOption[],
+  selections: ActiveRepoSelection[],
+): ActiveRepoSelection[] {
+  if (repositories.length === 0) return selections;
 
-  if (!trimmedOwner || !trimmedRepo) {
-    return null;
-  }
-
-  return {
-    owner: trimmedOwner,
-    repo: trimmedRepo,
-    branch: trimmedBranch,
-  };
+  return sortSelectionsByRepositoryOrder(
+    selections.filter((selection) =>
+      repositories.some(
+        (option) => option.owner === selection.owner && option.repo === selection.repo,
+      ),
+    ),
+    repositories,
+  );
 }
 
-function pickSelectableSelection(
+function sortSelectionsByRepositoryOrder(
+  selections: ActiveRepoSelection[],
   repositories: RepositoryOption[],
-  selection: ActiveRepoSelection | null,
-): ActiveRepoSelection | null {
-  if (!selection) return null;
-  if (repositories.length === 0) return selection;
-
-  const match = repositories.find(
-    (option) => option.owner === selection.owner && option.repo === selection.repo,
-  );
-  if (!match) return null;
-
-  return {
-    owner: match.owner,
-    repo: match.repo,
-    branch: selection.branch || match.defaultBranch || "main",
-  };
+): ActiveRepoSelection[] {
+  const order = new Map(repositories.map((repo, index) => [`${repo.owner}/${repo.repo}`.toLowerCase(), index]));
+  return selections.slice().sort((left, right) => {
+    const leftOrder = order.get(formatActiveRepoLabel(left).toLowerCase()) ?? Number.MAX_SAFE_INTEGER;
+    const rightOrder = order.get(formatActiveRepoLabel(right).toLowerCase()) ?? Number.MAX_SAFE_INTEGER;
+    return leftOrder - rightOrder;
+  });
 }
 
 function pickOwnerHint(status: GitHubStatusResponse): string | null {
   return status.app?.owner?.login || status.ownerHint || null;
 }
 
-function formatExpiry(iso: string) {
-  const date = new Date(iso);
-  if (Number.isNaN(date.getTime())) return iso;
-  return date.toLocaleString([], {
-    month: "short",
-    day: "numeric",
-    hour: "2-digit",
-    minute: "2-digit",
-  });
-}
-
 function StatusChip({ state }: { state: StatusState }) {
   if (state.kind === "loading") {
-    return <span className="rounded-full border border-white/10 bg-white/[0.04] px-3 py-1 text-xs text-[#dce6f1]">проверяю</span>;
+    return <span className="rounded-full border border-[#2a3341] bg-[#171d28] px-3 py-1 text-xs text-[#dce6f1]">проверяю</span>;
   }
   if (state.kind === "error") {
     return <span className="rounded-full border border-rose-400/20 bg-rose-400/10 px-3 py-1 text-xs text-rose-200">ошибка</span>;
   }
   if (!state.configured) {
-    return <span className="rounded-full border border-amber-300/20 bg-amber-300/10 px-3 py-1 text-xs text-amber-100">нужно настроить</span>;
+    return <span className="rounded-full border border-amber-300/20 bg-amber-300/10 px-3 py-1 text-xs text-amber-100">настроить</span>;
   }
-  return <span className="rounded-full border border-emerald-400/20 bg-emerald-400/10 px-3 py-1 text-xs text-emerald-200">готово</span>;
-}
-
-function CopyButton({ label, onClick }: { label: string; onClick: () => void }) {
-  return (
-    <button
-      type="button"
-      onClick={onClick}
-      className="inline-flex items-center justify-center rounded-full border border-white/12 bg-white/[0.04] px-4 py-2.5 text-sm font-semibold text-[#e6eef8] transition hover:bg-white/[0.08]"
-    >
-      {label}
-    </button>
-  );
-}
-
-function MetaPill({ label, value }: { label: string; value: string }) {
-  return (
-    <span className="rounded-full border border-white/10 bg-white/[0.04] px-3 py-1.5 font-mono text-[11px]">
-      <span className="mr-1.5 text-[#70839b]">{label}</span>
-      <span className="text-[#e8f0fa]">{value}</span>
-    </span>
-  );
+  return <span className="rounded-full border border-emerald-400/20 bg-emerald-400/10 px-3 py-1 text-xs text-emerald-100">готово</span>;
 }
 
 function Notice({
@@ -576,11 +407,13 @@ function Notice({
   const cls =
     tone === "error"
       ? "border border-rose-400/25 bg-rose-400/10 text-rose-100"
-      : "border border-white/10 bg-black/15 text-[#d7e0ec]";
+      : "border border-[#27303d] bg-[#111722] text-[#d7e0ec]";
 
   return (
-    <div className={`rounded-[18px] px-4 py-3 text-sm ${cls}`}>
-      <div className="mb-1.5 text-[11px] font-semibold uppercase tracking-[0.18em] opacity-80">{title}</div>
+    <div className={`rounded-[16px] px-4 py-3 text-sm ${cls}`}>
+      <div className="mb-1.5 text-[11px] font-semibold uppercase tracking-[0.18em] opacity-80">
+        {title}
+      </div>
       <div className="leading-6">{children}</div>
     </div>
   );
