@@ -8,8 +8,10 @@
     "build": "next build",
     "start": "next start -p 29128 -H 127.0.0.1",
     "lint": "next lint",
-    "typecheck": "tsc --noEmit",
-    "test": "node --import tsx/esm --test tests/**/*.test.ts"
+    "typecheck": "next typegen && tsc --noEmit",
+    "test": "node --import tsx/esm --test tests/**/*.test.ts",
+    "supervisor:once": "node --import tsx/esm scripts/supervisor-watch.ts --once",
+    "supervisor:watch": "node --import tsx/esm scripts/supervisor-watch.ts"
   },
   "dependencies": {
     "chrome-remote-interface": "^0.34.0",

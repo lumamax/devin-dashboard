@@ -78,6 +78,24 @@ test("scoreAccount marks exhausted when daily quota is zero", async () => {
   assert.equal(result.score, 0);
 });
 
+test("scoreAccount marks exhausted when weekly quota is zero", async () => {
+  const { scoreAccount } = await import("../src/lib/accountScorer.ts");
+  const result = scoreAccount(
+    {
+      id: "acc-4b",
+      name: "Weekly Exhausted",
+      quota: { dailyPercentage: 100, weeklyPercentage: 0 },
+      lifecycle: { hasCreds: true, testStatus: "valid", rateLimitedUntil: null, lastError: null },
+      repo: { assignedRepoFullName: null, assignedBranch: null },
+    },
+    { targetRepo: null },
+  );
+
+  assert.equal(result.disqualified, true);
+  assert.equal(result.lifecycle, "exhausted");
+  assert.equal(result.score, 0);
+});
+
 test("scoreAccount detects draining state when weekly quota is low", async () => {
   const { scoreAccount } = await import("../src/lib/accountScorer.ts");
   const result = scoreAccount(

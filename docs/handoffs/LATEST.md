@@ -35,6 +35,13 @@ The current objective is to operate multiple Devin accounts as interchangeable c
   - `README.md`
   - `docs/cloud-agent-operating-model.md`
   - `docs/handoffs/LATEST.md`
+- Added the first thread-independent local supervisor loop:
+  - `src/lib/supervisorWatcher.ts`
+  - `scripts/supervisor-watch.ts`
+  - `docs/supervisor-watcher.md`
+  - new npm scripts: `supervisor:once`, `supervisor:watch`
+  - threshold-driven checkpoint / force / stop actions with local state under `~/.devin-dashboard/`
+  - CDP session nudges when the account is running in a dashboard-managed Chrome profile
 
 ## Git state
 
@@ -48,6 +55,7 @@ The current objective is to operate multiple Devin accounts as interchangeable c
 
 - `npm test` — passing locally
 - `npm run build` — passing locally
+- `npm run typecheck` — passing locally (`next typegen && tsc --noEmit`)
 - Live checks already confirmed that backend-first bootstrap can create real Devin sessions and inject the bootstrap prompt through the Devin API path
 
 ## Architecture decisions
@@ -83,8 +91,8 @@ The current objective is to operate multiple Devin accounts as interchangeable c
 
 ## Next best action
 
-Build the next operator-grade step on top of this foundation:
+Validate and harden the new supervisor loop:
 
-- make the supervisor use live quota thresholds and `pick-best-account` together
-- trigger a forced checkpoint / handoff before a working Devin session enters the final quota band
-- surface branch / ownership / handoff status clearly enough that multiple Devin sessions can be coordinated without guessing
+- rerun `npm test` and `npm run build` after the watcher changes
+- prove that dashboard-launched Chrome windows keep a reusable debug port for quota-driven checkpoint nudges
+- if possible, discover the pure backend endpoint for sending a new instruction into an already running Devin session so the watcher can stop depending on CDP for live nudges

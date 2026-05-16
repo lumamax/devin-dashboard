@@ -166,7 +166,7 @@ export async function startAccountSession(
     try {
       const response = await transport.postJson<JsonRecord>("/api/sessions", payload);
       return {
-        sessionId,
+        sessionId: extractStartedSessionId(response) || sessionId,
         username,
         modelOverride,
         payload,
@@ -234,17 +234,32 @@ async function createStoredAccountTransport(accountId: string) {
       const resolvedFromInfo = info ? extractUsername(info) : null;
       if (resolvedFromInfo) return resolvedFromInfo;
 
+      const currentUserId = info ? extractCurrentUserId(info) : null;
+      if (currentUserId) {
+        const profile = await getJson<JsonRecord>(`/api/users/${encodeURIComponent(currentUserId)}/profile`).catch(() => null);
+        const resolvedFromProfile = profile ? extractUsername(profile) : null;
+        if (resolvedFromProfile) return resolvedFromProfile;
+      }
+
       const recentSessions = await getJson<unknown>(
         buildSessionListPath(currentCreds.orgId, {
           limit: 5,
           includeArchived: false,
-          creatorUserId: info ? extractCurrentUserId(info) : null,
+          creatorUserId: currentUserId,
         }),
       ).catch(() => null);
       const resolvedFromSessions = extractUsernameFromSessionHistory(recentSessions);
       if (resolvedFromSessions) return resolvedFromSessions;
 
-      throw new Error("Could not resolve Devin username from /api/users/info or recent sessions");
+      const orgMembers = await getJson<unknown>(
+        `/api/organizations/${encodeURIComponent(currentCreds.orgId)}/members`,
+      ).catch(() => null);
+      const resolvedFromMembers = extractUsernameFromOrganizationMembers(orgMembers, currentUserId);
+      if (resolvedFromMembers) return resolvedFromMembers;
+
+      throw new Error(
+        "Could not resolve Devin username from /api/users/info, /api/users/{id}/profile, organization members, or recent sessions",
+      );
     },
   };
 }
@@ -274,6 +289,22 @@ function buildSessionListPath(
     params.set("creators", options.creatorUserId);
   }
   return `/api/${encodeURIComponent(orgId)}/v2sessions?${params.toString()}`;
+}
+
+export function extractStartedSessionId(payload: unknown): string | null {
+  if (!payload || typeof payload !== "object" || Array.isArray(payload)) {
+    return null;
+  }
+
+  const obj = payload as JsonRecord;
+  for (const key of ["devin_id", "devinId", "session_id", "sessionId", "id"]) {
+    const value = obj[key];
+    if (typeof value === "string" && value.trim()) {
+      return value.trim();
+    }
+  }
+
+  return null;
 }
 
 export function buildSessionStartRequest(input: {
@@ -479,7 +510,16 @@ function extractCurrentUserId(info: JsonRecord): string | null {
 }
 
 function extractUsername(info: JsonRecord): string | null {
-  const direct = readString(info, ["username", "github_username", "githubUsername", "login", "handle"]);
+  const direct = readString(info, [
+    "username",
+    "github_username",
+    "githubUsername",
+    "login",
+    "handle",
+    "preferred_name",
+    "preferredName",
+    "name",
+  ]);
   if (direct) return direct;
 
   for (const key of ["user", "current_user", "viewer", "data"]) {
@@ -513,6 +553,36 @@ function extractUsernameFromSessionRow(row: JsonRecord): string | null {
   if (direct) return direct;
 
   const email = readNestedString(row, ["initial_user_message_contents", "email"]);
+  if (email && email.includes("@")) {
+    const localPart = email.split("@")[0]?.trim();
+    if (localPart) return localPart;
+  }
+
+  return null;
+}
+
+
+export function extractUsernameFromOrganizationMembers(
+  payload: unknown,
+  currentUserId: string | null,
+): string | null {
+  const rows = extractList(payload);
+  if (rows.length === 0) return null;
+
+  const preferred = currentUserId
+    ? rows.find((row) => readString(row, ["user_id", "id"]) === currentUserId) || null
+    : null;
+  const candidate = preferred || (rows.length === 1 ? rows[0] : null);
+  if (!candidate) return null;
+
+  return extractUsernameFromOrganizationMember(candidate);
+}
+
+function extractUsernameFromOrganizationMember(row: JsonRecord): string | null {
+  const direct = readString(row, ["name", "preferred_name", "preferredName", "username"]);
+  if (direct) return direct;
+
+  const email = readString(row, ["email"]);
   if (email && email.includes("@")) {
     const localPart = email.split("@")[0]?.trim();
     if (localPart) return localPart;

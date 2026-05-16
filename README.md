@@ -177,6 +177,28 @@ If this repo is being used as the current multi-account Devin pilot, start here:
 
 These files define how local supervision, cloud Devin agents, milestone sync, multi-session ownership, git continuity, seat-related constraints, GitHub App migration, and handoff discipline work in this contour.
 
+
+## Supervisor watcher
+
+The repo now includes a lightweight local supervisor loop that can run outside this Codex thread.
+
+Use it when you want quota-based rotation and checkpoint nudges to keep running even if the chat is closed:
+
+```bash
+npm run supervisor:once
+npm run supervisor:watch
+```
+
+What it does:
+
+- polls Devin quota headroom for stored accounts
+- reacts only to threshold crossings, not every poll
+- recommends the best successor account for the same repo
+- tries to inject a short checkpoint / handoff prompt into the live Devin session via CDP when the account is running in a dashboard-managed Chrome profile
+- writes local state and event logs under `~/.devin-dashboard/`
+
+Read [`docs/supervisor-watcher.md`](docs/supervisor-watcher.md) for the full operating model and current limitations.
+
 ## Roadmap
 
 - **v0.2 (this release)** — Auto-login wizard, JSON-blob credential storage,

@@ -9,6 +9,7 @@
 import { NextResponse } from "next/server";
 import { z } from "zod";
 import { getStoredAccount } from "@/lib/connectionStore";
+import { findExistingDebugPort, findFreeDebugPort } from "@/lib/devinSessionSeeder";
 import { DEVIN_WEB_URL, LauncherError, launchChrome } from "@/lib/launcher";
 
 const BodySchema = z
@@ -55,24 +56,34 @@ export async function POST(
     );
   }
 
+  const userDataDir =
+    launchContext?.launchStrategy === "user-data-dir"
+      ? launchContext.userDataDir
+      : launchContext?.launchStrategy === "chrome-profile"
+        ? launchContext.chromeUserDataDir
+        : undefined;
+  const existingDebugPort = userDataDir ? findExistingDebugPort(userDataDir) : null;
+  const remoteDebuggingPort = existingDebugPort || (userDataDir
+    ? await findFreeDebugPort().catch(() => null)
+    : null);
+
   try {
     const result = launchChrome({
       connectionId: id,
       url: parsed.url || DEVIN_WEB_URL,
       binaryPath: parsed.binaryPath,
       profileRoot: parsed.profileRoot,
-      userDataDir:
-        launchContext?.launchStrategy === "user-data-dir"
-          ? launchContext.userDataDir
-          : launchContext?.launchStrategy === "chrome-profile"
-            ? launchContext.chromeUserDataDir
-            : undefined,
+      userDataDir,
       profileDirectory:
         launchContext?.launchStrategy === "chrome-profile"
           ? launchContext.chromeProfileDirectory
           : undefined,
+      remoteDebuggingPort: remoteDebuggingPort || undefined,
     });
-    return NextResponse.json(result);
+    return NextResponse.json({
+      ...result,
+      remoteDebuggingPort: remoteDebuggingPort || null,
+    });
   } catch (err) {
     if (err instanceof LauncherError) {
       const status = err.code === "browser_not_found" ? 500 : 400;

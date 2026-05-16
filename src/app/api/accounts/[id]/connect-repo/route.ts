@@ -4,11 +4,13 @@ import { buildCloudAgentPrompt } from "@/lib/bootstrapPrompt";
 import { getStoredAccount, updateAccountCreds } from "@/lib/connectionStore";
 import {
   buildDevinLaunchUrl,
+  buildDevinSessionWebUrl,
   findExistingDebugPort,
   findFreeDebugPort,
   seedPromptViaCdp,
 } from "@/lib/devinSessionSeeder";
 import { startAccountSession } from "@/lib/devinControlPlane";
+import { DevinApiError } from "@/lib/devinApi";
 import { buildGitHubBootstrap } from "@/lib/githubApp";
 import { DEVIN_WEB_URL, LauncherError, launchChrome } from "@/lib/launcher";
 
@@ -95,10 +97,25 @@ export async function POST(
 
     await updateAccountCreds(id, account.creds, providerSpecificData);
 
-    const backendSeed = await startAccountSession(id, {
-      prompt,
-      modelOverride: "devin-opus-4-7",
-    }).catch(() => null);
+    let backendSeed = null;
+    let backendStartError: {
+      message: string;
+      status: number | null;
+      detail: string | null;
+    } | null = null;
+
+    try {
+      backendSeed = await startAccountSession(id, {
+        prompt,
+        modelOverride: "devin-opus-4-7",
+      });
+    } catch (error) {
+      backendStartError = {
+        message: error instanceof Error ? error.message : String(error),
+        status: error instanceof DevinApiError ? error.status : null,
+        detail: error instanceof DevinApiError ? error.bodyText : null,
+      };
+    }
 
     const launchContext = account.launchContext || null;
     const userDataDir =
@@ -121,8 +138,7 @@ export async function POST(
     const launch = launchChrome({
       connectionId: id,
       url: launchUrl,
-      remoteDebuggingPort:
-        existingDebugPort || !chromePort || backendSeed ? undefined : chromePort,
+      remoteDebuggingPort: chromePort || undefined,
       userDataDir,
       profileDirectory:
         launchContext?.launchStrategy === "chrome-profile"
@@ -165,6 +181,7 @@ export async function POST(
             modelOverride: backendSeed.modelOverride,
           }
         : null,
+      backendStartError,
       assignment: {
         owner: parsed.owner,
         repo: parsed.repo,
@@ -186,9 +203,4 @@ export async function POST(
       { status: 500 },
     );
   }
-}
-
-function buildDevinSessionWebUrl(sessionId: string): string {
-  const normalized = sessionId.replace(/^devin-/, "");
-  return `https://app.devin.ai/sessions/${normalized}?tab=README.md`;
 }

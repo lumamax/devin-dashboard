@@ -16,6 +16,14 @@ type SeedPromptOptions = {
   chromePort: number;
   prompt: string;
   launchToken?: string;
+  targetUrlIncludes?: string[];
+  timeoutMs?: number;
+};
+
+export type SeedPromptToSessionOptions = {
+  chromePort: number;
+  prompt: string;
+  sessionId: string;
   timeoutMs?: number;
 };
 
@@ -35,6 +43,11 @@ export function buildDevinLaunchUrl(launchToken: string): string {
   const url = new URL(DEVIN_WEB_URL);
   url.searchParams.set("devin_dashboard_launch", launchToken);
   return url.toString();
+}
+
+export function buildDevinSessionWebUrl(sessionId: string): string {
+  const normalized = sessionId.replace(/^devin-/, "");
+  return `https://app.devin.ai/sessions/${normalized}`;
 }
 
 export async function findFreeDebugPort(): Promise<number> {
@@ -229,13 +242,33 @@ export function buildComposerInjectionScript(prompt: string): string {
 }
 
 export async function seedPromptViaCdp(options: SeedPromptOptions): Promise<DevinSeedResult> {
+  return seedPromptViaCdpInternal(options);
+}
+
+export async function seedPromptViaCdpToSession(
+  options: SeedPromptToSessionOptions,
+): Promise<DevinSeedResult> {
+  return seedPromptViaCdpInternal({
+    chromePort: options.chromePort,
+    prompt: options.prompt,
+    timeoutMs: options.timeoutMs,
+    targetUrlIncludes: [buildDevinSessionWebUrl(options.sessionId)],
+  });
+}
+
+async function seedPromptViaCdpInternal(options: SeedPromptOptions): Promise<DevinSeedResult> {
   const timeoutMs = options.timeoutMs ?? 25000;
   let client: CDP.Client | null = null;
   let pageUrl: string | null = null;
   let lastReason = "target_not_found";
 
   try {
-    const target = await waitForTarget(options.chromePort, options.launchToken, timeoutMs);
+    const target = await waitForTarget(
+      options.chromePort,
+      options.launchToken,
+      timeoutMs,
+      options.targetUrlIncludes,
+    );
     if (!target.webSocketDebuggerUrl) {
       return {
         attempted: true,
@@ -347,6 +380,7 @@ async function waitForTarget(
   chromePort: number,
   launchToken: string | undefined,
   timeoutMs: number,
+  targetUrlIncludes: string[] | undefined,
 ): Promise<CdpTarget> {
   const deadline = Date.now() + timeoutMs;
   let lastError: Error | null = null;
@@ -355,6 +389,14 @@ async function waitForTarget(
     try {
       const targets = (await CDP.List({ port: chromePort })) as CdpTarget[];
       const pages = targets.filter((target) => target.type === "page");
+      if (targetUrlIncludes && targetUrlIncludes.length > 0) {
+        const preferred = pages.find((target) =>
+          targetUrlIncludes.some((fragment) => (target.url || "").includes(fragment)),
+        );
+        if (preferred) {
+          return preferred;
+        }
+      }
       if (launchToken) {
         const preferred = pages.find((target) =>
           (target.url || "").includes(`devin_dashboard_launch=${launchToken}`),

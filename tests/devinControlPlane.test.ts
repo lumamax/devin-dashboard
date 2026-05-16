@@ -97,6 +97,17 @@ test("extractSessionRows and normalizeSessionSummary understand Devin v2sessions
 });
 
 
+test("extractStartedSessionId prefers the backend-confirmed Devin id", async () => {
+  const { extractStartedSessionId } = await import("../src/lib/devinControlPlane.ts");
+
+  const sessionId = extractStartedSessionId({
+    devin_id: "devin-real-session",
+    id: "devin-local-request",
+  });
+
+  assert.equal(sessionId, "devin-real-session");
+});
+
 test("buildSessionStartRequest matches the captured Devin create-session shape", async () => {
   const { buildSessionStartRequest } = await import("../src/lib/devinControlPlane.ts");
 
@@ -136,4 +147,22 @@ test("extractUsernameFromSessionHistory falls back to recent Devin sessions", as
   });
 
   assert.equal(username, "github.max");
+});
+
+
+test("extractUsernameFromOrganizationMembers resolves the current member for fresh accounts", async () => {
+  const { extractUsernameFromOrganizationMembers } = await import("../src/lib/devinControlPlane.ts");
+
+  const username = extractUsernameFromOrganizationMembers(
+    [
+      {
+        user_id: "user-012c402d12c44eaeb2ca54d041d17a8a",
+        name: "github.dan",
+        email: "github.dan@dan-max.com",
+      },
+    ],
+    "user-012c402d12c44eaeb2ca54d041d17a8a",
+  );
+
+  assert.equal(username, "github.dan");
 });

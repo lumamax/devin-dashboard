@@ -47,6 +47,11 @@ type ConnectRepoResponse = {
     username?: string | null;
     modelOverride?: string | null;
   } | null;
+  backendStartError?: {
+    message?: string | null;
+    status?: number | null;
+    detail?: string | null;
+  } | null;
   launched?: {
     pid?: number;
     url?: string;
@@ -415,8 +420,8 @@ export function AccountCard({ account }: { account: AccountSummary }) {
         throw new Error(prsJson.error || `HTTP ${prsRes.status}`);
       }
 
-      const resolvedSession = detailJson.session;
-      const resolvedEvents = eventsJson.events;
+      const resolvedSession = detailJson.session!;
+      const resolvedEvents = eventsJson.events!;
 
       setSessionFocus((current) => ({
         ...current,
@@ -504,6 +509,7 @@ export function AccountCard({ account }: { account: AccountSummary }) {
         pageUrl: json.autoSeed?.pageUrl || null,
       };
       const autoSeedReasonText = describeAutoSeedReason(autoSeed.reason, autoSeed.attempted);
+      const backendStartErrorText = describeBackendStartError(json.backendStartError || null);
 
       setAssignedRepoFullName(fullName);
       setAssignedBranch(nextBranch);
@@ -527,7 +533,9 @@ export function AccountCard({ account }: { account: AccountSummary }) {
           ? json.startedSession?.sessionId
             ? `Создал новую Devin-сессию для ${fullName} и сразу отправил туда prompt.`
             : `Репо ${fullName} прошито. Devin получил prompt. Теперь открой сессию и проверь, что он действительно начал git clone.`
-          : `Репо ${fullName} закреплено, но prompt пока не подтверждён в чате${autoSeedReasonText ? `: ${autoSeedReasonText}` : ""}. Если Devin ничего не показал, вставь prompt из блока ниже вручную.`,
+          : backendStartErrorText
+            ? `Репо ${fullName} закреплено, но новую Devin-сессию запустить не получилось: ${backendStartErrorText}.`
+            : `Репо ${fullName} закреплено, но prompt пока не подтверждён в чате${autoSeedReasonText ? `: ${autoSeedReasonText}` : ""}. Если Devin ничего не показал, вставь prompt из блока ниже вручную.`,
       );
 
       setSessionsOpen(true);
@@ -1202,6 +1210,23 @@ function describeAutoSeedReason(reason: string | null, attempted: boolean): stri
   if (reason === "debug_port_unavailable") return "браузер открылся без debug-порта, поэтому автоподача не стартовала";
   if (attempted) return "автоподача не добилась подтверждённой отправки";
   return null;
+}
+
+function describeBackendStartError(
+  error: ConnectRepoResponse["backendStartError"],
+): string | null {
+  if (!error) return null;
+  const detail = String(error.detail || "").toLowerCase();
+  if (detail.includes("out_of_quota")) {
+    return "у аккаунта закончилась квота";
+  }
+  if (detail.includes("billing error")) {
+    return "у аккаунта есть billing-блокировка";
+  }
+  if (error.status === 403) {
+    return "Devin отверг запуск новой сессии";
+  }
+  return error.message || null;
 }
 
 function toAvailablePercentage(usedPercentage: number | null): number | null {

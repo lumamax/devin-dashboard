@@ -122,11 +122,9 @@ export function resolveLifecycle(
   if (quota) {
     const daily = quota.dailyPercentage;
     const weekly = quota.weeklyPercentage;
-    if (daily !== null && daily <= 0 && weekly !== null && weekly <= 0) {
-      return "exhausted";
-    }
     if (daily !== null && daily <= 0) return "exhausted";
-    if (weekly !== null && weekly > 0 && weekly <= 10) return "draining";
+    if (weekly !== null && weekly <= 0) return "exhausted";
+    if (weekly !== null && weekly <= 10) return "draining";
   }
 
   if (lc.lastError) return "errored";
