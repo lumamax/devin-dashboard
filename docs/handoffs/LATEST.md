@@ -4,89 +4,47 @@
 
 Continue `lumamax/devin-dashboard` as the active control-plane pilot for multi-account Devin work.
 
-The current local objective is no longer just "store multiple Devin accounts".
-The active objective is to turn those accounts into interchangeable cloud workers that can continue one shared git contour with handoffs, repo bootstrap, and quota-aware routing.
+The active objective is to turn stored accounts into interchangeable cloud workers that can continue one shared git contour with handoffs, repo bootstrap, and quota-aware routing.
 
 ## Completed
 
-- Pushed current dashboard work to `main` at commit `1a48b49`.
-- Stabilized the local-only dashboard contour on `http://127.0.0.1:29128/`.
-- Confirmed that Devin web credentials are stored as `devin-web` provider connections through OmniRoute.
-- Confirmed live quota readout and model visibility per account.
-- Confirmed quota semantics used by Devin in this contour:
-  - `100%` means fully used
-  - `0%` means headroom remains
-- Added and validated per-account session control-plane endpoints:
-  - `GET /api/accounts/[id]/sessions`
-  - `GET /api/accounts/[id]/sessions/[sessionId]`
-  - `GET /api/accounts/[id]/sessions/[sessionId]/events`
-  - `GET /api/accounts/[id]/sessions/[sessionId]/prs`
-- Fixed Devin payload parsing for real web responses:
-  - session lists use `result`
-  - status may arrive in `latest_status_contents`
-  - event stream may arrive as one JSON payload instead of NDJSON
-- Confirmed the UI can now show:
-  - recent sessions
-  - selected session summary
-  - session status
-  - PR references
-  - event-derived summary blocks
-- Added repo assignment / bootstrap pieces:
-  - GitHub App broker panel
-  - repo bootstrap prompt generation
-  - per-account repo assignment state
-  - connect-repo route
-  - session seeding helpers
-- Captured the architecture decision that this repo is the Devin-specific control plane, not a replacement for OmniRoute.
+- Everything from the previous handoff (commit `1a48b49`) remains intact.
+- Added `pick-best-account` control-plane path (Phase 2 from `docs/devin-control-plane-target.md`):
+  - `src/lib/accountScorer.ts` — scoring engine that evaluates accounts on three dimensions:
+    - quota headroom (daily + weekly, 0-50 points)
+    - lifecycle state: active / draining / errored / needs-relink / rate-limited / exhausted (0-30 points)
+    - repo readiness: whether the account already has the target repo assigned (0-20 points)
+  - `GET /api/accounts/pick-best?targetRepo=owner/repo` — API route that fetches all stored accounts, enriches each with live quota data via the Devin billing API, scores them, and returns a ranked list with the best pick highlighted.
+  - `src/components/PickBestAccountPanel.tsx` — dashboard UI panel with target repo input, score button, best-account highlight, and expandable full ranking table showing lifecycle badges and score breakdowns.
+  - `tests/accountScorer.test.ts` — 10 unit tests covering all scoring dimensions, lifecycle transitions, ranking order, and edge cases.
+- Integrated the panel into `src/app/page.tsx` between the repo bootstrap panel and the accounts list.
 
 ## Git state
 
 - Repository: `lumamax/devin-dashboard`
-- Branch: `main`
-- Current commit: `1a48b49`
+- Branch: `devin/1778921979-pick-best-account` (PR into `main`)
+- Base commit on `main`: `24c5af7`
 - Remote: `origin https://github.com/lumamax/devin-dashboard.git`
-- Push state: `HEAD` is pushed and `origin/main` matches local `main`
-- PR status: there is an older open `PR #1` referenced inside recovered Devin session history, but the current local work was pushed directly to `main`
 
 ## Validation
 
-- `npm test` — passing (`23/23`)
+- `npm test` — 32/33 passing (1 pre-existing failure: `connectionStore.test.ts` needs `sqlite3` binary not present on cloud VM)
 - `npm run typecheck` — passing
-- `npm run build` — passing
-- Local dashboard server verified on `127.0.0.1:29128`
-- Live API spot checks verified for:
-  - account inventory
-  - quota data
-  - model labels
-  - recent sessions
-  - session details
-  - PR data
-  - event summaries
+- `npm run build` — passing, new `/api/accounts/pick-best` route visible in build output
 
 ## Architecture decisions
 
-- Do not treat this repo as a generic router.
-- The current canonical stack is:
-  1. `OmniRoute` = routing and quota-aware execution plane
-  2. `Devin Dashboard` = Devin-specific control plane and operator UI
-  3. `GitHub App broker` = short-lived repo access plane
-  4. private GitHub under `lumamax` = durable source of truth
-  5. handoff docs = continuity between cloud sessions
-- Do not preserve continuity through hidden VM state.
-- Preserve continuity through git state, repo bootstrap, and short factual handoffs.
-- Shared Devin-org access is still blocked by seat allocation on the current plan.
-- Current practical repo-access model remains:
-  - near term: machine user + per-account SSH keys if needed
-  - target: GitHub App installation tokens issued by the control plane
+- All previous architecture decisions remain unchanged.
+- The scoring engine is intentionally simple and deterministic — no ML, no external state. Weights can be tuned later.
+- Disqualification is binary: accounts missing creds, rate-limited, or fully exhausted get score 0 and sort to the bottom.
+- The `draining` lifecycle (weekly quota <= 10%) is a soft warning, not a disqualification — the supervisor can still pick it if no better option exists.
+- Repo readiness gives a 20-point boost to accounts already assigned to the target repo, reducing friction for the supervisor.
 
 ## Important context for the next agent
 
-- The question "are we reinventing OmniRoute?" was resolved as follows:
-  - OmniRoute already covers a large part of quota-aware routing and context relay.
-  - This repo adds the missing Devin-specific orchestration layer: captured web sessions, Chrome-profile launch, account/session inspection, repo assignment, and GitHub bootstrap.
-- Therefore the right direction is not to collapse everything into OmniRoute immediately.
-- First stabilize the Devin control plane here.
-- Later move mature routing primitives back into OmniRoute once the Devin workflow is proven.
+- The scoring weights (quota: 50, lifecycle: 30, repo: 20) are initial values. Adjust based on real-world usage patterns.
+- The `pick-best` endpoint calls the Devin billing API for every account in parallel. With many accounts this could be slow; consider caching quota data with a short TTL if latency becomes a problem.
+- The panel fetches on mount and on button click. It does not auto-refresh.
 
 ## Key docs to read first
 
@@ -99,9 +57,9 @@ The active objective is to turn those accounts into interchangeable cloud worker
 
 ## Next best action
 
-Build the next operator-grade step in this repo:
+Build controlled task handoff into a new Devin session (Phase 3 from `docs/devin-control-plane-target.md`):
 
-- add a `pick-best-account` control-plane path that scores active Devin accounts by usable quota, lifecycle state, and repo readiness
-- surface that in the dashboard so the supervisor can choose the next cloud worker without manually inspecting each card
-
-After that, the next phase is session bootstrap into a new Devin worker from shared git + handoff, not from reused VM state.
+- generate a bootstrap prompt from the current repo state and latest handoff
+- attach repo assignment cleanly to the chosen account
+- open a new Devin session on the best-scoring account with the bootstrap prompt pre-filled
+- resume work in the new account when the current one runs out of quota
