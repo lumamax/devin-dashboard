@@ -58,7 +58,15 @@ export async function GET(request: NextRequest) {
 
     return NextResponse.json({
       ok: true,
-      best: best ? { accountId: best.accountId, name: best.name, score: best.score } : null,
+      best: best
+        ? {
+            accountId: best.accountId,
+            name: best.name,
+            score: best.score,
+            quotaBand: best.quotaBand,
+            effectiveHeadroom: best.effectiveHeadroom,
+          }
+        : null,
       ranked,
       targetRepo,
     });

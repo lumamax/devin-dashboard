@@ -36,6 +36,8 @@ export type ScoredAccount = {
   lifecycle: AccountLifecycle;
   dailyPercentage: number | null;
   weeklyPercentage: number | null;
+  effectiveHeadroom: number | null;
+  quotaBand: QuotaBand;
   assignedRepoFullName: string | null;
   disqualified: boolean;
   disqualifyReason: string | null;
@@ -48,6 +50,25 @@ export type AccountLifecycle =
   | "errored"
   | "exhausted"
   | "draining";
+
+/**
+ * Quota bands defined by `docs/supervisor-cloud-sync-contract.md`,
+ * keyed off effective headroom = `min(daily remaining, weekly remaining)`.
+ *
+ *   > 20%     → healthy        : normal work allowed
+ *   10 – 20%  → draining       : do not start a broad new task
+ *   ≤ 10%    → checkpoint     : prepare clean milestone push
+ *   ≤  5%    → forced-handoff : push working branch and hand off
+ *   ≤  2%    → stop-work      : only finalize sync, no new implementation
+ *   no data   → unknown        : surface visibly so the supervisor decides
+ */
+export type QuotaBand =
+  | "healthy"
+  | "draining"
+  | "checkpoint"
+  | "forced-handoff"
+  | "stop-work"
+  | "unknown";
 
 export type ScoreAccountInput = {
   id: string;
@@ -77,6 +98,9 @@ export function scoreAccount(
   const repoScore = computeRepoScore(input.repo, options.targetRepo);
   const score = disqualified ? 0 : quotaScore + lifecycleScore + repoScore;
 
+  const effectiveHeadroom = computeEffectiveHeadroom(input.quota);
+  const quotaBand = classifyQuotaBand(input.quota);
+
   return {
     accountId: input.id,
     name: input.name,
@@ -87,10 +111,45 @@ export function scoreAccount(
     lifecycle,
     dailyPercentage: input.quota?.dailyPercentage ?? null,
     weeklyPercentage: input.quota?.weeklyPercentage ?? null,
+    effectiveHeadroom,
+    quotaBand,
     assignedRepoFullName: input.repo.assignedRepoFullName,
     disqualified,
     disqualifyReason,
   };
+}
+
+/**
+ * Effective headroom = the tighter of daily and weekly remaining percentages.
+ * Returns null when neither value is known.
+ */
+export function computeEffectiveHeadroom(
+  quota: AccountQuotaInput | null,
+): number | null {
+  if (!quota) return null;
+  const daily = quota.dailyPercentage;
+  const weekly = quota.weeklyPercentage;
+  if (daily === null && weekly === null) return null;
+  if (daily === null) return weekly;
+  if (weekly === null) return daily;
+  return Math.min(daily, weekly);
+}
+
+/**
+ * Classify a quota input into the bands defined by `supervisor-cloud-sync-contract.md`.
+ * Thresholds compare against the effective headroom (the tighter of daily and weekly
+ * remaining percentages). The boundaries match the contract exactly: 2%, 5%, 10%, 20%.
+ */
+export function classifyQuotaBand(
+  quota: AccountQuotaInput | null,
+): QuotaBand {
+  const headroom = computeEffectiveHeadroom(quota);
+  if (headroom === null) return "unknown";
+  if (headroom <= 2) return "stop-work";
+  if (headroom <= 5) return "forced-handoff";
+  if (headroom <= 10) return "checkpoint";
+  if (headroom <= 20) return "draining";
+  return "healthy";
 }
 
 export function rankAccounts(

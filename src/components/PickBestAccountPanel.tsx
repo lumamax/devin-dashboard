@@ -2,6 +2,14 @@
 
 import { useEffect, useState } from "react";
 
+type QuotaBand =
+  | "healthy"
+  | "draining"
+  | "checkpoint"
+  | "forced-handoff"
+  | "stop-work"
+  | "unknown";
+
 type ScoredAccount = {
   accountId: string;
   name: string;
@@ -12,6 +20,8 @@ type ScoredAccount = {
   lifecycle: string;
   dailyPercentage: number | null;
   weeklyPercentage: number | null;
+  effectiveHeadroom: number | null;
+  quotaBand: QuotaBand;
   assignedRepoFullName: string | null;
   disqualified: boolean;
   disqualifyReason: string | null;
@@ -20,7 +30,13 @@ type ScoredAccount = {
 type PickBestResponse = {
   ok: boolean;
   error?: string;
-  best: { accountId: string; name: string; score: number } | null;
+  best: {
+    accountId: string;
+    name: string;
+    score: number;
+    quotaBand: QuotaBand;
+    effectiveHeadroom: number | null;
+  } | null;
   ranked: ScoredAccount[];
   targetRepo: string | null;
 };
@@ -125,8 +141,11 @@ function RankingResult({
             1
           </div>
           <div className="min-w-0 flex-1">
-            <div className="text-sm font-semibold text-emerald-100">{best.name}</div>
-            <div className="text-xs text-emerald-300/70">
+            <div className="flex flex-wrap items-center gap-2">
+              <span className="text-sm font-semibold text-emerald-100">{best.name}</span>
+              <QuotaBandBadge band={best.quotaBand} headroom={best.effectiveHeadroom} />
+            </div>
+            <div className="mt-1 text-xs text-emerald-300/70">
               Score {best.score}/100 &mdash; best available account for the next task
             </div>
           </div>
@@ -176,6 +195,7 @@ function RankedAccountRow({ account, rank }: { account: ScoredAccount; rank: num
           <span className={`rounded-full px-2 py-0.5 text-[10px] font-semibold ${lifecycleColor}`}>
             {account.lifecycle}
           </span>
+          <QuotaBandBadge band={account.quotaBand} headroom={account.effectiveHeadroom} />
         </div>
         <div className="mt-0.5 flex flex-wrap gap-3 text-[10px] text-[#8293aa]">
           <span>Q: {account.quotaScore}</span>
@@ -219,5 +239,77 @@ function getLifecycleColor(lifecycle: string): string {
       return "border-zinc-400/20 bg-zinc-400/10 text-zinc-300";
     default:
       return "border-white/10 bg-white/5 text-[#aab5c4]";
+  }
+}
+
+function QuotaBandBadge({
+  band,
+  headroom,
+}: {
+  band: QuotaBand;
+  headroom: number | null;
+}) {
+  const { label, color } = describeQuotaBand(band);
+  const headroomLabel = headroom !== null ? ` ${Math.round(headroom)}%` : "";
+  return (
+    <span
+      title={describeQuotaBandTooltip(band)}
+      className={`rounded-full border px-2 py-0.5 text-[10px] font-semibold ${color}`}
+    >
+      {label}
+      {headroomLabel}
+    </span>
+  );
+}
+
+function describeQuotaBand(band: QuotaBand): { label: string; color: string } {
+  switch (band) {
+    case "healthy":
+      return {
+        label: "healthy",
+        color: "border-emerald-400/20 bg-emerald-400/10 text-emerald-200",
+      };
+    case "draining":
+      return {
+        label: "draining",
+        color: "border-amber-400/20 bg-amber-400/10 text-amber-200",
+      };
+    case "checkpoint":
+      return {
+        label: "checkpoint",
+        color: "border-orange-400/20 bg-orange-400/10 text-orange-200",
+      };
+    case "forced-handoff":
+      return {
+        label: "forced handoff",
+        color: "border-rose-400/30 bg-rose-400/10 text-rose-200",
+      };
+    case "stop-work":
+      return {
+        label: "stop work",
+        color: "border-red-500/40 bg-red-500/15 text-red-200",
+      };
+    case "unknown":
+      return {
+        label: "unknown",
+        color: "border-white/10 bg-white/5 text-[#aab5c4]",
+      };
+  }
+}
+
+function describeQuotaBandTooltip(band: QuotaBand): string {
+  switch (band) {
+    case "healthy":
+      return "Headroom > 20%. Normal work allowed.";
+    case "draining":
+      return "Headroom 10–20%. Do not start a broad new task.";
+    case "checkpoint":
+      return "Headroom ≤ 10%. Prepare a clean milestone push.";
+    case "forced-handoff":
+      return "Headroom ≤ 5%. Push working branch and hand off to a fresher account.";
+    case "stop-work":
+      return "Headroom ≤ 2%. Only finalize sync; do not start any new implementation work.";
+    case "unknown":
+      return "No quota data yet — supervisor decides.";
   }
 }
