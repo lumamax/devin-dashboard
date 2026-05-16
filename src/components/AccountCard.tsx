@@ -280,6 +280,15 @@ export function AccountCard({ account }: { account: AccountSummary }) {
     }
   }
 
+  async function handleStart() {
+    if (account.hasCreds && activeRepo) {
+      await handleConnectRepo();
+      return;
+    }
+
+    await handleLaunch();
+  }
+
   async function handleOpenSession(session: SessionSummary) {
     setStatus("launching");
     setStatusMessage(null);
@@ -475,6 +484,7 @@ export function AccountCard({ account }: { account: AccountSummary }) {
   const quotaSummary =
     quota.kind === "ready" ? buildQuotaSummary(quota.usage, quota.status, quota.models) : null;
   const selectedSession = selectedSessionId ? sessionFocus[selectedSessionId] : null;
+  const startUsesPrompt = account.hasCreds && Boolean(activeRepo);
 
   return (
     <article className="grid gap-2.5 px-4 py-3 transition hover:bg-white/[0.02] xl:grid-cols-[minmax(280px,1.08fr)_minmax(330px,1fr)_minmax(236px,0.72fr)_180px] xl:items-center xl:gap-4 xl:px-5">
@@ -583,23 +593,27 @@ export function AccountCard({ account }: { account: AccountSummary }) {
         <div className="flex w-full flex-col gap-2 sm:w-auto xl:items-end">
           <button
             type="button"
-            onClick={handleLaunch}
+            onClick={handleStart}
             disabled={status === "launching" || status === "connecting"}
             className="inline-flex min-w-[160px] items-center justify-center rounded-full border border-emerald-400/20 bg-emerald-400 px-4 py-2.5 text-sm font-semibold text-slate-950 transition hover:bg-emerald-300 disabled:cursor-not-allowed disabled:opacity-50"
           >
-            {status === "launching" ? "Открываю…" : "Открыть"}
+            {status === "connecting" ? "Стартую…" : status === "launching" ? "Открываю…" : startUsesPrompt ? "Старт" : "Открыть"}
           </button>
           <button
             type="button"
-            onClick={handleConnectRepo}
+            onClick={handleLaunch}
             disabled={status === "launching" || status === "connecting"}
             className="inline-flex min-w-[160px] items-center justify-center rounded-full border border-white/12 bg-white/[0.04] px-4 py-2.5 text-sm font-semibold text-[#e6eef8] transition hover:bg-white/[0.08] disabled:cursor-not-allowed disabled:opacity-50"
           >
-            {status === "connecting" ? "Готовлю…" : "Открыть + prompt"}
+            Открыть без prompt
           </button>
         </div>
         <p className="max-w-[180px] text-right text-[11px] leading-5 text-[#7e8ea5]">
-          {activeRepo ? `Активно: ${formatActiveRepoLabel(activeRepo)}` : "Сначала выбери рабочее репо сверху"}
+          {startUsesPrompt
+            ? `Старт использует: ${formatActiveRepoLabel(activeRepo!)}`
+            : activeRepo
+              ? `Активно: ${formatActiveRepoLabel(activeRepo)}`
+              : "Сначала выбери рабочее репо сверху"}
         </p>
       </div>
 
