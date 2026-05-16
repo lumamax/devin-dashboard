@@ -114,8 +114,8 @@ export function RepoBootstrapPanel() {
       const repositories = normalizeRepositories(json.repositories);
       const ownerHint = pickOwnerHint(json);
       const firstRepo = repositories[0] || null;
-      const currentSelection = normalizeSelection(owner, repo, branch);
-      const savedSelection = getActiveRepoSelection();
+      const currentSelection = pickSelectableSelection(repositories, normalizeSelection(owner, repo, branch));
+      const savedSelection = pickSelectableSelection(repositories, getActiveRepoSelection());
       const fallbackSelection = normalizeSelection(
         firstRepo?.owner || ownerHint || "lumamax",
         firstRepo?.repo || "devin-dashboard",
@@ -239,7 +239,7 @@ export function RepoBootstrapPanel() {
           </p>
 
           <p className="mt-2 text-xs leading-5 text-[#7f91a8]">
-            Это активное репо используют кнопки <b className="text-[#dce6f1]">«Открыть + репо»</b> у аккаунтов ниже.
+            Это активное репо используют кнопки <b className="text-[#dce6f1]">«Прошить репо»</b> у аккаунтов ниже.
           </p>
         </div>
 
@@ -285,7 +285,13 @@ export function RepoBootstrapPanel() {
                 </div>
 
                 {status.repositories.length > 0 ? (
-                  <div className="flex flex-wrap gap-2">
+                  <div className="space-y-3">
+                    <div className="text-xs leading-5 text-[#8fa0b5]">
+                      {status.repositories.length === 1
+                        ? `Сейчас GitHub App видит только одно репо: ${status.repositories[0]?.fullName}. Именно оно и будет активным.`
+                        : `Сейчас GitHub App видит ${status.repositories.length} репо. Нажми нужное, и оно станет активным для кнопок ниже.`}
+                    </div>
+                    <div className="flex flex-wrap gap-2">
                     {status.repositories.map((option) => {
                       const active = option.owner === owner.trim() && option.repo === repo.trim();
                       return (
@@ -303,6 +309,7 @@ export function RepoBootstrapPanel() {
                         </button>
                       );
                     })}
+                    </div>
                   </div>
                 ) : (
                   <div className="rounded-[16px] border border-dashed border-white/10 bg-black/15 px-4 py-3 text-sm text-[#8fa0b5]">
@@ -486,6 +493,25 @@ function normalizeSelection(
     owner: trimmedOwner,
     repo: trimmedRepo,
     branch: trimmedBranch,
+  };
+}
+
+function pickSelectableSelection(
+  repositories: RepositoryOption[],
+  selection: ActiveRepoSelection | null,
+): ActiveRepoSelection | null {
+  if (!selection) return null;
+  if (repositories.length === 0) return selection;
+
+  const match = repositories.find(
+    (option) => option.owner === selection.owner && option.repo === selection.repo,
+  );
+  if (!match) return null;
+
+  return {
+    owner: match.owner,
+    repo: match.repo,
+    branch: selection.branch || match.defaultBranch || "main",
   };
 }
 

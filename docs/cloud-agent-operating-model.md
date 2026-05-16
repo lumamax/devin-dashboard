@@ -4,6 +4,8 @@
 
 This repository is the current pilot control plane for multi-account Devin execution.
 
+The shared synchronization contract for local Codex and cloud Devin sessions lives in `docs/supervisor-cloud-sync-contract.md`.
+
 The goal is not to preserve one Devin VM forever. The goal is to let multiple Devin cloud agents continue the same delivery contour through:
 
 - a shared private GitHub source of truth
@@ -134,6 +136,25 @@ When starting a new cloud session:
 8. Prefer `Opus 4.7`, then `Max`, then `xhide` if available
 9. Work only against the shared git contour
 10. Before pausing, update the handoff
+11. Follow `docs/supervisor-cloud-sync-contract.md` for milestone sync and multi-session rules
+
+## Parallel session rule
+
+Multiple Devin sessions may work on one repository only when branch ownership and write ownership are explicit.
+
+Safe pattern:
+
+- one scoped task per session
+- one branch per session
+- disjoint write surface or clearly ordered dependency
+
+Unsafe pattern:
+
+- two sessions editing the same file group
+- two sessions pushing to the same task branch
+- two sessions racing the same release or migration step
+
+If ownership is not explicit, the supervisor must serialize the work.
 
 ## Handoff policy
 

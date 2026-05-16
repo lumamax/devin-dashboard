@@ -95,3 +95,45 @@ test("extractSessionRows and normalizeSessionSummary understand Devin v2sessions
   assert.equal(session.latestStatus?.enum, "finished");
   assert.equal(session.latestStatus?.message, "Session suspended");
 });
+
+
+test("buildSessionStartRequest matches the captured Devin create-session shape", async () => {
+  const { buildSessionStartRequest } = await import("../src/lib/devinControlPlane.ts");
+
+  const payload = buildSessionStartRequest({
+    sessionId: "devin-abc123",
+    prompt: "привет",
+    username: "github.max",
+    modelOverride: "devin-opus-4-7",
+  });
+
+  assert.equal(payload.devin_id, "devin-abc123");
+  assert.equal(payload.user_message, "привет");
+  assert.equal(payload.username, "github.max");
+  assert.equal(payload.snapshot_id, null);
+  assert.deepEqual(payload.tags, []);
+  assert.deepEqual(payload.repos, []);
+  assert.deepEqual(payload.rich_content, [{ text: "привет" }]);
+  assert.deepEqual(payload.additional_args, {
+    planning_mode: "automatic",
+    planner_type: "fast",
+    from_spaces: "false",
+    bypass_approval: false,
+    devin_version_override: "devin-opus-4-7",
+  });
+});
+
+test("extractUsernameFromSessionHistory falls back to recent Devin sessions", async () => {
+  const { extractUsernameFromSessionHistory } = await import("../src/lib/devinControlPlane.ts");
+
+  const username = extractUsernameFromSessionHistory({
+    result: [
+      {
+        latest_loop_contents: { username: "github.max" },
+        initial_user_message_contents: { email: "github.max@dan-max.com" },
+      },
+    ],
+  });
+
+  assert.equal(username, "github.max");
+});

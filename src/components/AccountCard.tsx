@@ -9,7 +9,7 @@ import {
 } from "@/lib/activeRepo";
 import type { AccountSummary } from "@/lib/omniroute";
 
-type Status = "idle" | "launching" | "connecting" | "success" | "error";
+type Status = "idle" | "launching" | "connecting" | "success" | "warning" | "error";
 
 type ModelSummary = {
   id: string;
@@ -40,9 +40,16 @@ type ConnectRepoResponse = {
     ok?: boolean;
     reason?: string | null;
     action?: string | null;
+    pageUrl?: string | null;
   };
+  startedSession?: {
+    sessionId?: string | null;
+    username?: string | null;
+    modelOverride?: string | null;
+  } | null;
   launched?: {
     pid?: number;
+    url?: string;
   };
 };
 
@@ -161,6 +168,25 @@ type QuotaSummary = {
   weeklyDetail: string;
 };
 
+type BootstrapAssistState =
+  | { kind: "idle" }
+  | {
+      kind: "ready";
+      prompt: string;
+      repoLabel: string;
+      branch: string;
+      copied: boolean;
+      launchUrl: string | null;
+      autoSeed: {
+        attempted: boolean;
+        ok: boolean;
+        reason: string | null;
+        action: string | null;
+        pageUrl: string | null;
+      };
+      sessionId: string | null;
+    };
+
 export function AccountCard({ account }: { account: AccountSummary }) {
   const [status, setStatus] = useState<Status>("idle");
   const [statusMessage, setStatusMessage] = useState<string | null>(null);
@@ -172,6 +198,7 @@ export function AccountCard({ account }: { account: AccountSummary }) {
   const [sessionsState, setSessionsState] = useState<SessionListState>({ kind: "idle" });
   const [selectedSessionId, setSelectedSessionId] = useState<string | null>(null);
   const [sessionFocus, setSessionFocus] = useState<Record<string, SessionFocusState>>({});
+  const [bootstrapAssist, setBootstrapAssist] = useState<BootstrapAssistState>({ kind: "idle" });
 
   useEffect(() => {
     setAssignedRepoFullName(account.assignedRepoFullName || null);
@@ -183,6 +210,7 @@ export function AccountCard({ account }: { account: AccountSummary }) {
     setSessionsState({ kind: "idle" });
     setSelectedSessionId(null);
     setSessionFocus({});
+    setBootstrapAssist({ kind: "idle" });
   }, [account.id]);
 
   useEffect(() => {
@@ -259,21 +287,21 @@ export function AccountCard({ account }: { account: AccountSummary }) {
     }
   }
 
-  async function handleLaunch() {
+  async function handleLaunch(options?: { url?: string; successMessage?: string }) {
     setStatus("launching");
     setStatusMessage(null);
     try {
       const res = await fetch(`/api/accounts/${account.id}/launch`, {
         method: "POST",
         headers: { "Content-Type": "application/json" },
-        body: "{}",
+        body: JSON.stringify(options?.url ? { url: options.url } : {}),
       });
       const json = await res.json();
       if (!res.ok || !json.ok) {
         throw new Error(json.error || `HTTP ${res.status}`);
       }
       setStatus("success");
-      setStatusMessage(`Chrome открыт (pid ${json.pid})`);
+      setStatusMessage(options?.successMessage || `Chrome открыт (pid ${json.pid})`);
     } catch (err: unknown) {
       setStatus("error");
       setStatusMessage(err instanceof Error ? err.message : "Unknown error");
@@ -281,12 +309,20 @@ export function AccountCard({ account }: { account: AccountSummary }) {
   }
 
   async function handleStart() {
-    if (account.hasCreds && activeRepo) {
-      await handleConnectRepo();
-      return;
-    }
+    const preferredUrl = selectedSessionId
+      ? buildSessionWebUrl(selectedSessionId)
+      : bootstrapAssist.kind === "ready"
+        ? bootstrapAssist.autoSeed.pageUrl || bootstrapAssist.launchUrl
+        : null;
 
-    await handleLaunch();
+    await handleLaunch({
+      url: preferredUrl || undefined,
+      successMessage: selectedSessionId
+        ? "Открыл выбранную Devin-сессию."
+        : bootstrapAssist.kind === "ready"
+          ? "Открыл подготовленное окно Devin."
+          : "Открыл аккаунт в Devin.",
+    });
   }
 
   async function handleOpenSession(session: SessionSummary) {
@@ -415,6 +451,21 @@ export function AccountCard({ account }: { account: AccountSummary }) {
     await loadSessionFocus(sessionId);
   }
 
+  async function handleCopyBootstrapPrompt() {
+    if (bootstrapAssist.kind !== "ready") return;
+
+    const copied = await copyPrompt(bootstrapAssist.prompt);
+    setBootstrapAssist((current) =>
+      current.kind === "ready" ? { ...current, copied } : current,
+    );
+    setStatus(copied ? "success" : "warning");
+    setStatusMessage(
+      copied
+        ? "Prompt скопирован. Если Devin не получил его автоматически, просто открой сессию и вставь его вручную."
+        : "Clipboard не сработал. Prompt уже показан ниже, его можно вставить вручную.",
+    );
+  }
+
   async function handleConnectRepo() {
     if (!account.hasCreds) {
       setStatus("error");
@@ -445,30 +496,45 @@ export function AccountCard({ account }: { account: AccountSummary }) {
       const fullName = json.assignment?.fullName || formatActiveRepoLabel(activeRepo);
       const nextBranch = json.assignment?.branch || activeRepo.branch;
       const copied = json.prompt ? await copyPrompt(json.prompt) : false;
-      const autoSeedOk = json.autoSeed?.ok === true;
-      const autoSeedAttempted = json.autoSeed?.attempted === true;
-      const autoSeedReason = json.autoSeed?.reason || null;
-      const autoSeedReasonText =
-        autoSeedReason === "no_seat_allocated"
-          ? "у аккаунта сейчас нет seat для запуска"
-          : autoSeedReason === "repository_selection_required"
-            ? "Devin просит сначала выбрать репозитории"
-            : autoSeedReason === "send_button_not_found"
-              ? "кнопка отправки пока не появилась"
-              : autoSeedAttempted
-                ? "автоподстановка не добилась отправки"
-                : null;
+      const autoSeed = {
+        attempted: json.autoSeed?.attempted === true,
+        ok: json.autoSeed?.ok === true,
+        reason: json.autoSeed?.reason || null,
+        action: json.autoSeed?.action || null,
+        pageUrl: json.autoSeed?.pageUrl || null,
+      };
+      const autoSeedReasonText = describeAutoSeedReason(autoSeed.reason, autoSeed.attempted);
 
       setAssignedRepoFullName(fullName);
       setAssignedBranch(nextBranch);
-      setStatus("success");
-      setStatusMessage(
-        autoSeedOk
-          ? `Аккаунт открыт, репо ${fullName} закреплено, prompt отправлен в Devin. Репозиторий внутри VM появится только после того, как агент реально выполнит git clone.`
-          : copied
-            ? `Аккаунт открыт, репо ${fullName} закреплено только в дашборде. Prompt скопирован, но не подтверждён как отправленный${autoSeedReasonText ? `, ${autoSeedReasonText}` : ""}.`
-            : `Аккаунт открыт, репо ${fullName} закреплено только в дашборде. Prompt готов, но clipboard не сработал.`,
+      setBootstrapAssist(
+        json.prompt
+          ? {
+              kind: "ready",
+              prompt: json.prompt,
+              repoLabel: fullName,
+              branch: nextBranch,
+              copied,
+              launchUrl: json.launched?.url || null,
+              autoSeed,
+              sessionId: json.startedSession?.sessionId || null,
+            }
+          : { kind: "idle" },
       );
+      setStatus(autoSeed.ok ? "success" : "warning");
+      setStatusMessage(
+        autoSeed.ok
+          ? json.startedSession?.sessionId
+            ? `Создал новую Devin-сессию для ${fullName} и сразу отправил туда prompt.`
+            : `Репо ${fullName} прошито. Devin получил prompt. Теперь открой сессию и проверь, что он действительно начал git clone.`
+          : `Репо ${fullName} закреплено, но prompt пока не подтверждён в чате${autoSeedReasonText ? `: ${autoSeedReasonText}` : ""}. Если Devin ничего не показал, вставь prompt из блока ниже вручную.`,
+      );
+
+      setSessionsOpen(true);
+      void loadSessions(true);
+      globalThis.setTimeout(() => {
+        void loadSessions(true);
+      }, 2500);
     } catch (err: unknown) {
       setStatus("error");
       setStatusMessage(err instanceof Error ? err.message : "Unknown error");
@@ -484,7 +550,7 @@ export function AccountCard({ account }: { account: AccountSummary }) {
   const quotaSummary =
     quota.kind === "ready" ? buildQuotaSummary(quota.usage, quota.status, quota.models) : null;
   const selectedSession = selectedSessionId ? sessionFocus[selectedSessionId] : null;
-  const startUsesPrompt = account.hasCreds && Boolean(activeRepo);
+  const canSeedRepo = account.hasCreds && Boolean(activeRepo);
 
   return (
     <article className="grid gap-2.5 px-4 py-3 transition hover:bg-white/[0.02] xl:grid-cols-[minmax(280px,1.08fr)_minmax(330px,1fr)_minmax(236px,0.72fr)_180px] xl:items-center xl:gap-4 xl:px-5">
@@ -519,7 +585,7 @@ export function AccountCard({ account }: { account: AccountSummary }) {
 
         {assignedRepoFullName ? (
           <p className="text-[11px] leading-5 text-[#7f91a8]">
-            Закрепление репо здесь не равно нативному подключению в Devin. Пока агент не получил bootstrap prompt и не выполнил `git clone`, он может не видеть код и начать искать репозиторий в вебе.
+            Пока Devin не выполнил команды из prompt и не сделал `git clone`, код внутри его VM ещё не появился.
           </p>
         ) : null}
 
@@ -593,36 +659,106 @@ export function AccountCard({ account }: { account: AccountSummary }) {
         <div className="flex w-full flex-col gap-2 sm:w-auto xl:items-end">
           <button
             type="button"
-            onClick={handleStart}
-            disabled={status === "launching" || status === "connecting"}
+            onClick={handleConnectRepo}
+            disabled={!canSeedRepo || status === "launching" || status === "connecting"}
             className="inline-flex min-w-[160px] items-center justify-center rounded-full border border-emerald-400/20 bg-emerald-400 px-4 py-2.5 text-sm font-semibold text-slate-950 transition hover:bg-emerald-300 disabled:cursor-not-allowed disabled:opacity-50"
           >
-            {status === "connecting" ? "Стартую…" : status === "launching" ? "Открываю…" : startUsesPrompt ? "Старт" : "Открыть"}
+            {status === "connecting" ? "Прошиваю…" : "Прошить репо"}
           </button>
           <button
             type="button"
-            onClick={handleLaunch}
+            onClick={handleStart}
             disabled={status === "launching" || status === "connecting"}
             className="inline-flex min-w-[160px] items-center justify-center rounded-full border border-white/12 bg-white/[0.04] px-4 py-2.5 text-sm font-semibold text-[#e6eef8] transition hover:bg-white/[0.08] disabled:cursor-not-allowed disabled:opacity-50"
           >
-            Открыть без prompt
+            {status === "launching" ? "Открываю…" : "Старт"}
           </button>
         </div>
-        <p className="max-w-[180px] text-right text-[11px] leading-5 text-[#7e8ea5]">
-          {startUsesPrompt
-            ? `Старт использует: ${formatActiveRepoLabel(activeRepo!)}`
-            : activeRepo
-              ? `Активно: ${formatActiveRepoLabel(activeRepo)}`
-              : "Сначала выбери рабочее репо сверху"}
+        <p className="max-w-[220px] text-right text-[11px] leading-5 text-[#7e8ea5]">
+          {bootstrapAssist.kind === "ready"
+            ? bootstrapAssist.sessionId
+              ? `Последняя прошивка создала одну новую Devin-сессию: ${shrinkId(bootstrapAssist.sessionId, 6)}`
+              : `Последняя прошивка: ${bootstrapAssist.repoLabel}`
+            : canSeedRepo
+              ? `Прошивка создаст одну новую Devin-сессию для ${formatActiveRepoLabel(activeRepo!)}`
+              : activeRepo
+                ? `Выбрано: ${formatActiveRepoLabel(activeRepo)}`
+                : "Сначала выбери рабочее репо сверху"}
         </p>
       </div>
+
+      {bootstrapAssist.kind === "ready" ? (
+        <div
+          className={`rounded-[16px] border px-3 py-3 text-xs xl:col-span-4 ${
+            bootstrapAssist.autoSeed.ok
+              ? "border-emerald-400/20 bg-emerald-400/10 text-emerald-100"
+              : "border-amber-300/20 bg-amber-300/10 text-amber-50"
+          }`}
+        >
+          <div className="flex flex-col gap-3 lg:flex-row lg:items-start lg:justify-between">
+            <div className="min-w-0">
+              <div className="flex flex-wrap items-center gap-2 text-[11px]">
+                <InlineBadge tone={bootstrapAssist.autoSeed.ok ? "ok" : "warn"}>
+                  {bootstrapAssist.autoSeed.ok ? "prompt отправлен" : "нужна проверка"}
+                </InlineBadge>
+                <InlineBadge tone="neutral">{bootstrapAssist.repoLabel}</InlineBadge>
+                <InlineBadge tone="neutral">{bootstrapAssist.branch}</InlineBadge>
+              </div>
+              <p className="mt-2 max-w-3xl text-[12px] leading-5 opacity-90">
+                {bootstrapAssist.autoSeed.ok
+                  ? bootstrapAssist.sessionId
+                    ? "Создана одна новая Devin-сессия этого аккаунта, и стартовый prompt ушёл сразу в неё. Остальные старые сессии аккаунта это не трогает."
+                    : "Devin получил стартовый prompt. Теперь важно только проверить, что в чате пошли команды clone/open и агент реально увидел репозиторий."
+                  : `Автоподача prompt не подтверждена${describeAutoSeedReason(bootstrapAssist.autoSeed.reason, bootstrapAssist.autoSeed.attempted) ? `: ${describeAutoSeedReason(bootstrapAssist.autoSeed.reason, bootstrapAssist.autoSeed.attempted)}` : ""}. Нажми «Старт», открой Devin и при необходимости вставь prompt вручную.`}
+              </p>
+            </div>
+
+            <div className="flex flex-wrap gap-2">
+              <button
+                type="button"
+                onClick={() => void handleCopyBootstrapPrompt()}
+                className="rounded-full border border-white/12 bg-white/[0.08] px-3 py-1.5 text-[11px] font-semibold text-white transition hover:bg-white/[0.12]"
+              >
+                {bootstrapAssist.copied ? "Скопировать ещё раз" : "Скопировать prompt"}
+              </button>
+              {bootstrapAssist.autoSeed.pageUrl || bootstrapAssist.launchUrl ? (
+                <button
+                  type="button"
+                  onClick={() =>
+                    void handleLaunch({
+                      url: bootstrapAssist.autoSeed.pageUrl || bootstrapAssist.launchUrl || undefined,
+                      successMessage: "Открыл окно Devin для этой прошивки.",
+                    })
+                  }
+                  className="rounded-full border border-white/12 bg-white/[0.04] px-3 py-1.5 text-[11px] font-semibold text-white transition hover:bg-white/[0.08]"
+                >
+                  Открыть Devin
+                </button>
+              ) : null}
+            </div>
+          </div>
+
+          {!bootstrapAssist.autoSeed.ok ? (
+            <details className="mt-3 rounded-[12px] border border-black/10 bg-black/10 px-3 py-2 text-[11px] text-[#fff8e6]">
+              <summary className="cursor-pointer font-semibold text-[#fff3c2]">
+                Prompt для ручной вставки
+              </summary>
+              <pre className="mt-2 overflow-x-auto whitespace-pre-wrap font-mono text-[11px] leading-5 text-[#fff8e6]">
+                {bootstrapAssist.prompt}
+              </pre>
+            </details>
+          ) : null}
+        </div>
+      ) : null}
 
       {statusMessage ? (
         <div
           className={`rounded-[16px] border px-3 py-2.5 text-xs xl:col-span-4 ${
             status === "error"
               ? "border-rose-400/30 bg-rose-400/10 text-rose-200"
-              : "border-emerald-400/20 bg-emerald-400/10 text-emerald-100"
+              : status === "warning"
+                ? "border-amber-300/20 bg-amber-300/10 text-amber-50"
+                : "border-emerald-400/20 bg-emerald-400/10 text-emerald-100"
           }`}
         >
           {statusMessage}
@@ -1055,6 +1191,17 @@ function buildSessionWebUrl(devinId: string): string {
 
 function humanize(value: string): string {
   return value.replace(/[_-]+/g, " ");
+}
+
+function describeAutoSeedReason(reason: string | null, attempted: boolean): string | null {
+  if (reason === "no_seat_allocated") return "у аккаунта сейчас нет seat для запуска";
+  if (reason === "repository_selection_required") return "Devin просит сначала выбрать репозитории";
+  if (reason === "send_button_not_found") return "кнопка отправки пока не появилась";
+  if (reason === "opened_composer") return "Devin только открыл composer, но ещё не отправил сообщение";
+  if (reason === "composer_not_found") return "поле ввода в Devin пока не нашлось";
+  if (reason === "debug_port_unavailable") return "браузер открылся без debug-порта, поэтому автоподача не стартовала";
+  if (attempted) return "автоподача не добилась подтверждённой отправки";
+  return null;
 }
 
 function toAvailablePercentage(usedPercentage: number | null): number | null {

@@ -3,7 +3,8 @@ import {
   MissingConfigError,
   updateAccountCreds,
 } from "@/lib/connectionStore";
-import { DevinApiError, devinGet, devinGetText } from "@/lib/devinApi";
+import { randomBytes } from "node:crypto";
+import { DevinApiError, devinGet, devinGetText, devinPost } from "@/lib/devinApi";
 
 type JsonRecord = Record<string, unknown>;
 
@@ -78,6 +79,21 @@ export type DevinSessionEventOptions = {
   take?: number;
 };
 
+export type DevinSessionStartOptions = {
+  prompt: string;
+  modelOverride?: string | null;
+  tags?: string[];
+  repos?: JsonRecord[];
+};
+
+export type DevinStartedSession = {
+  sessionId: string;
+  username: string;
+  modelOverride: string | null;
+  payload: JsonRecord;
+  response: JsonRecord;
+};
+
 export async function listAccountSessions(
   accountId: string,
   options: DevinSessionListOptions = {},
@@ -127,6 +143,43 @@ export async function getAccountSessionEvents(
   return summarizeSessionEventFeed(text, options.take || 60);
 }
 
+export async function startAccountSession(
+  accountId: string,
+  options: DevinSessionStartOptions,
+): Promise<DevinStartedSession> {
+  const transport = await createStoredAccountTransport(accountId);
+  const username = await transport.resolveUsername();
+  const modelCandidates = options.modelOverride ? [options.modelOverride, null] : [null];
+  let lastError: Error | null = null;
+
+  for (const modelOverride of modelCandidates) {
+    const sessionId = createDevinSessionId();
+    const payload = buildSessionStartRequest({
+      sessionId,
+      prompt: options.prompt,
+      username,
+      modelOverride,
+      tags: options.tags || [],
+      repos: options.repos || [],
+    });
+
+    try {
+      const response = await transport.postJson<JsonRecord>("/api/sessions", payload);
+      return {
+        sessionId,
+        username,
+        modelOverride,
+        payload,
+        response,
+      };
+    } catch (error) {
+      lastError = error instanceof Error ? error : new Error(String(error));
+    }
+  }
+
+  throw lastError || new Error("Failed to start Devin session");
+}
+
 async function createStoredAccountTransport(accountId: string) {
   const account = await getStoredAccount(accountId);
   if (!account) {
@@ -161,13 +214,37 @@ async function createStoredAccountTransport(accountId: string) {
     return result.data;
   };
 
+  const postJson = async <T>(path: string, body: unknown): Promise<T> => {
+    const result = await devinPost<T>(path, body, currentCreds, onRefresh);
+    if (!result.ok) throw result.error;
+    return result.data;
+  };
+
   return {
     account,
     getJson,
     getText,
+    postJson,
     async resolveCurrentUserId(): Promise<string | null> {
       const info = await getJson<JsonRecord>("/api/users/info");
       return extractCurrentUserId(info);
+    },
+    async resolveUsername(): Promise<string> {
+      const info = await getJson<JsonRecord>("/api/users/info").catch(() => null);
+      const resolvedFromInfo = info ? extractUsername(info) : null;
+      if (resolvedFromInfo) return resolvedFromInfo;
+
+      const recentSessions = await getJson<unknown>(
+        buildSessionListPath(currentCreds.orgId, {
+          limit: 5,
+          includeArchived: false,
+          creatorUserId: info ? extractCurrentUserId(info) : null,
+        }),
+      ).catch(() => null);
+      const resolvedFromSessions = extractUsernameFromSessionHistory(recentSessions);
+      if (resolvedFromSessions) return resolvedFromSessions;
+
+      throw new Error("Could not resolve Devin username from /api/users/info or recent sessions");
     },
   };
 }
@@ -197,6 +274,40 @@ function buildSessionListPath(
     params.set("creators", options.creatorUserId);
   }
   return `/api/${encodeURIComponent(orgId)}/v2sessions?${params.toString()}`;
+}
+
+export function buildSessionStartRequest(input: {
+  sessionId: string;
+  prompt: string;
+  username: string;
+  modelOverride?: string | null;
+  tags?: string[];
+  repos?: JsonRecord[];
+}): JsonRecord {
+  const additionalArgs: JsonRecord = {
+    planning_mode: "automatic",
+    planner_type: "fast",
+    from_spaces: "false",
+    bypass_approval: false,
+  };
+  if (input.modelOverride) {
+    additionalArgs.devin_version_override = input.modelOverride;
+  }
+
+  return {
+    devin_id: input.sessionId,
+    user_message: input.prompt,
+    username: input.username,
+    snapshot_id: null,
+    additional_args: additionalArgs,
+    repos: input.repos || [],
+    tags: input.tags || [],
+    rich_content: [{ text: input.prompt }],
+  };
+}
+
+function createDevinSessionId(): string {
+  return `devin-${randomBytes(16).toString("hex")}`;
 }
 
 export function extractSessionRows(payload: unknown): JsonRecord[] {
@@ -365,6 +476,49 @@ function extractCurrentUserId(info: JsonRecord): string | null {
     || readNestedString(info, ["user", "id"])
     || readNestedString(info, ["user", "user_id"])
     || null;
+}
+
+function extractUsername(info: JsonRecord): string | null {
+  const direct = readString(info, ["username", "github_username", "githubUsername", "login", "handle"]);
+  if (direct) return direct;
+
+  for (const key of ["user", "current_user", "viewer", "data"]) {
+    const nested = info[key];
+    if (nested && typeof nested === "object" && !Array.isArray(nested)) {
+      const resolved = extractUsername(nested as JsonRecord);
+      if (resolved) return resolved;
+    }
+  }
+
+  return null;
+}
+
+export function extractUsernameFromSessionHistory(payload: unknown): string | null {
+  for (const row of extractSessionRows(payload)) {
+    const resolved = extractUsernameFromSessionRow(row);
+    if (resolved) return resolved;
+  }
+
+  if (payload && typeof payload === "object" && !Array.isArray(payload)) {
+    return extractUsernameFromSessionRow(payload as JsonRecord);
+  }
+
+  return null;
+}
+
+function extractUsernameFromSessionRow(row: JsonRecord): string | null {
+  const direct = readNestedString(row, ["latest_loop_contents", "username"])
+    || readNestedString(row, ["initial_user_message_contents", "username"])
+    || readNestedString(row, ["latest_message_contents", "username"]);
+  if (direct) return direct;
+
+  const email = readNestedString(row, ["initial_user_message_contents", "email"]);
+  if (email && email.includes("@")) {
+    const localPart = email.split("@")[0]?.trim();
+    if (localPart) return localPart;
+  }
+
+  return null;
 }
 
 function extractList(value: unknown): JsonRecord[] {

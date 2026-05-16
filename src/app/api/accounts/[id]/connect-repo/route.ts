@@ -8,6 +8,7 @@ import {
   findFreeDebugPort,
   seedPromptViaCdp,
 } from "@/lib/devinSessionSeeder";
+import { startAccountSession } from "@/lib/devinControlPlane";
 import { buildGitHubBootstrap } from "@/lib/githubApp";
 import { DEVIN_WEB_URL, LauncherError, launchChrome } from "@/lib/launcher";
 
@@ -70,7 +71,6 @@ export async function POST(
       branch: parsed.branch,
     });
     const prompt = buildCloudAgentPrompt(bootstrap);
-    const launchToken = `${id}-${Date.now()}`;
 
     const currentDashboard =
       account.providerSpecificData?.devinDashboard &&
@@ -95,6 +95,11 @@ export async function POST(
 
     await updateAccountCreds(id, account.creds, providerSpecificData);
 
+    const backendSeed = await startAccountSession(id, {
+      prompt,
+      modelOverride: "devin-opus-4-7",
+    }).catch(() => null);
+
     const launchContext = account.launchContext || null;
     const userDataDir =
       launchContext?.launchStrategy === "user-data-dir"
@@ -107,12 +112,17 @@ export async function POST(
       : null;
     const chromePort =
       existingDebugPort || (await findFreeDebugPort().catch(() => null));
-    const launchUrl = chromePort ? buildDevinLaunchUrl(launchToken) : DEVIN_WEB_URL;
+    const launchToken = `${id}-${Date.now()}`;
+    const launchUrl = backendSeed
+      ? buildDevinSessionWebUrl(backendSeed.sessionId)
+      : chromePort
+        ? buildDevinLaunchUrl(launchToken)
+        : DEVIN_WEB_URL;
     const launch = launchChrome({
       connectionId: id,
       url: launchUrl,
       remoteDebuggingPort:
-        existingDebugPort || !chromePort ? undefined : chromePort,
+        existingDebugPort || !chromePort || backendSeed ? undefined : chromePort,
       userDataDir,
       profileDirectory:
         launchContext?.launchStrategy === "chrome-profile"
@@ -120,20 +130,27 @@ export async function POST(
           : undefined,
     });
 
-    const autoSeed = chromePort
-      ? await seedPromptViaCdp({
-          chromePort,
-          prompt,
-          launchToken,
-        })
-      : {
-          attempted: false,
-          ok: false,
-          method: "cdp" as const,
-          reason: "debug_port_unavailable",
-          action: null,
-          pageUrl: null,
-        };
+    const autoSeed = backendSeed
+      ? {
+          attempted: true,
+          ok: true,
+          reason: null,
+          action: "created_session_via_api",
+          pageUrl: launchUrl,
+        }
+      : chromePort
+        ? await seedPromptViaCdp({
+            chromePort,
+            prompt,
+            launchToken,
+          })
+        : {
+            attempted: false,
+            ok: false,
+            reason: "debug_port_unavailable",
+            action: null,
+            pageUrl: null,
+          };
 
     return NextResponse.json({
       ok: true,
@@ -141,6 +158,13 @@ export async function POST(
       bootstrap,
       prompt,
       autoSeed,
+      startedSession: backendSeed
+        ? {
+            sessionId: backendSeed.sessionId,
+            username: backendSeed.username,
+            modelOverride: backendSeed.modelOverride,
+          }
+        : null,
       assignment: {
         owner: parsed.owner,
         repo: parsed.repo,
@@ -162,4 +186,9 @@ export async function POST(
       { status: 500 },
     );
   }
+}
+
+function buildDevinSessionWebUrl(sessionId: string): string {
+  const normalized = sessionId.replace(/^devin-/, "");
+  return `https://app.devin.ai/sessions/${normalized}?tab=README.md`;
 }

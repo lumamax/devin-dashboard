@@ -33,11 +33,12 @@ Read these files first:
 
 1. `README.md`
 2. `docs/cloud-agent-operating-model.md`
-3. `docs/devin-control-plane-target.md`
-4. `docs/multi-account-git-access.md`
-5. `docs/github-app-control-plane-plan.md`
-6. `docs/handoffs/LATEST.md`
-7. `docs/handoffs/TEMPLATE.md`
+3. `docs/supervisor-cloud-sync-contract.md`
+4. `docs/devin-control-plane-target.md`
+5. `docs/multi-account-git-access.md`
+6. `docs/github-app-control-plane-plan.md`
+7. `docs/handoffs/LATEST.md`
+8. `docs/handoffs/TEMPLATE.md`
 
 If repo access is missing, stop immediately and report:
 
@@ -49,8 +50,12 @@ If repo access is missing, stop immediately and report:
 ## Working rules for cloud agents
 
 - Work from the latest remote git state, not from assumptions about prior VM state.
+- Read and follow `docs/supervisor-cloud-sync-contract.md` before doing repo work.
 - Keep changes scoped to the active task.
 - Prefer small PRs with explicit summaries over large silent rewrites.
+- Assume one session = one branch = one scoped unit of work unless the supervisor explicitly says otherwise.
+- Use effective quota headroom = `min(daily remaining, weekly remaining)` when quota is visible. At `<=10%` prepare a checkpoint push, at `<=5%` push and hand off, at `<=2%` stop new implementation work.
+- Do not edit the same write surface in parallel with another cloud session unless ownership is explicit.
 - If you are blocked by local-only infrastructure, localhost services, local Chrome profile state, unpublished OmniRoute changes, or seat allocation inside Devin, say so plainly and hand back to the local supervisor.
 - If you depend on another repository, name it explicitly in your handoff.
 - If you open a PR, check Devin Review feedback before declaring the task complete.
