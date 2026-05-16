@@ -94,7 +94,7 @@ Long-term, the cleanest model is:
 - local supervisor or control plane issues short-lived installation tokens to active cloud agents
 - each cloud agent receives only the token needed for the current work window
 
-That is the best future state, but it is more operationally complex than the current pilot needs.
+That is the best future state. The detailed build plan now lives in `docs/github-app-control-plane-plan.md`.
 
 ## Account lifecycle
 
@@ -163,3 +163,4 @@ The current canonical operating model is:
 - Devin Dashboard is a dispatcher, not the source of truth
 - shared Devin-org access is blocked by seats on the current plan
 - the practical near-term solution is `machine user + per-account SSH keys`
+- the target long-term build contour is the GitHub App control plane in `docs/github-app-control-plane-plan.md`

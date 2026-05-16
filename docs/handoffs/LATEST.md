@@ -17,6 +17,7 @@ Continue the multi-account Devin workflow and preserve continuity after the orig
 - After approval, the routed free account landed on `No seat allocated` inside the `lumamax` Devin org.
 - The real blocker was therefore confirmed: shared Devin-org access is blocked by seat allocation on the current plan, not by GitHub cookies and not by broken GitHub auth.
 - The operating model was updated to recommend `machine user + per-account SSH keys` for the current pilot.
+- A dedicated long-term GitHub App control-plane plan was written for the next implementation phase.
 
 ## Git state
 
@@ -55,8 +56,8 @@ For the current pilot:
 - store the matching private key inside that Devin account's secrets
 - revoke per-account SSH keys during account retirement instead of rotating one global shared credential
 
-See `docs/multi-account-git-access.md` for the detailed rationale.
+See `docs/multi-account-git-access.md` for the current-state rationale and `docs/github-app-control-plane-plan.md` for the long-term build plan.
 
 ## Next best action
 
-Create the GitHub machine-user access contour for the pilot, provision one free Devin account with its own SSH credential to the private repo, then validate that a fresh `Opus 4.7` session can pull the repo, read the handoff, and continue work without shared Devin-org seats.
+Register the private GitHub App under `lumamax`, install it on `lumamax/devin-dashboard`, build a local token-minting MVP, then validate that one free Devin account can clone the pilot repo with a short-lived installation token and continue from this handoff.

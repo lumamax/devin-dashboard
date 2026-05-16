@@ -107,7 +107,7 @@ Use:
 - per-account secret storage inside Devin
 - git continuity plus handoff discipline
 
-See `docs/multi-account-git-access.md` for the detailed decision record.
+See `docs/multi-account-git-access.md` for the current decision record and `docs/github-app-control-plane-plan.md` for the target long-term control-plane architecture.
 
 ## Private repo access rule
 
@@ -127,12 +127,13 @@ When starting a new cloud session:
 1. Read `AGENTS.md`
 2. Read `docs/cloud-agent-operating-model.md`
 3. Read `docs/multi-account-git-access.md`
-4. Read `docs/handoffs/LATEST.md`
-5. Confirm repo access exists
-6. Confirm which branch / PR / task is current
-7. Prefer `Opus 4.7`, then `Max`, then `xhide` if available
-8. Work only against the shared git contour
-9. Before pausing, update the handoff
+4. Read `docs/github-app-control-plane-plan.md`
+5. Read `docs/handoffs/LATEST.md`
+6. Confirm repo access exists
+7. Confirm which branch / PR / task is current
+8. Prefer `Opus 4.7`, then `Max`, then `xhide` if available
+9. Work only against the shared git contour
+10. Before pausing, update the handoff
 
 ## Handoff policy
 
@@ -157,6 +158,7 @@ At the moment:
 - `ghoulgpt4` and `ghoulgpt5` currently have quota headroom
 - shared Devin-org access to `lumamax` is blocked by seat allocation on the current plan
 - the practical path forward is `machine user + per-account SSH keys`
+- the target build contour is the GitHub App plan in `docs/github-app-control-plane-plan.md`
 
 ## References
 
