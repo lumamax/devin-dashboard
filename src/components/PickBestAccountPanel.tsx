@@ -2,6 +2,15 @@
 
 import { useEffect, useState } from "react";
 
+type QuotaBand =
+  | "unknown"
+  | "healthy"
+  | "draining"
+  | "checkpoint"
+  | "forced-handoff"
+  | "stop-work"
+  | "exhausted";
+
 type ScoredAccount = {
   accountId: string;
   name: string;
@@ -10,6 +19,8 @@ type ScoredAccount = {
   lifecycleScore: number;
   repoScore: number;
   lifecycle: string;
+  quotaBand: QuotaBand;
+  effectiveHeadroom: number | null;
   dailyPercentage: number | null;
   weeklyPercentage: number | null;
   assignedRepoFullName: string | null;
@@ -116,6 +127,8 @@ function RankingResult({
   onToggleExpand: () => void;
 }) {
   const { best, ranked } = data;
+  const bestScored = best ? ranked.find((r) => r.accountId === best.accountId) ?? null : null;
+  const checkpointWarning = bestScored ? quotaBandWarning(bestScored.quotaBand) : null;
 
   return (
     <div className="space-y-4">
@@ -125,15 +138,32 @@ function RankingResult({
             1
           </div>
           <div className="min-w-0 flex-1">
-            <div className="text-sm font-semibold text-emerald-100">{best.name}</div>
+            <div className="flex flex-wrap items-center gap-2">
+              <span className="text-sm font-semibold text-emerald-100">{best.name}</span>
+              {bestScored && (
+                <span className={`rounded-full px-2 py-0.5 text-[10px] font-semibold ${getQuotaBandColor(bestScored.quotaBand)}`}>
+                  {quotaBandLabel(bestScored.quotaBand)}
+                </span>
+              )}
+            </div>
             <div className="text-xs text-emerald-300/70">
-              Score {best.score}/100 &mdash; best available account for the next task
+              Score {best.score}/100
+              {bestScored?.effectiveHeadroom !== null && bestScored?.effectiveHeadroom !== undefined
+                ? ` — effective headroom ${Math.round(bestScored.effectiveHeadroom)}%`
+                : " — best available account for the next task"}
             </div>
           </div>
         </div>
       ) : (
         <div className="rounded-[14px] border border-amber-400/20 bg-amber-400/10 px-4 py-3 text-sm text-amber-200">
           No qualified account found. All accounts are either exhausted, rate-limited, or need re-linking.
+        </div>
+      )}
+
+      {checkpointWarning && (
+        <div className={`rounded-[14px] border px-4 py-3 text-sm ${checkpointWarning.tone}`}>
+          <div className="font-semibold">{checkpointWarning.title}</div>
+          <div className="mt-0.5 text-xs opacity-90">{checkpointWarning.body}</div>
         </div>
       )}
 
@@ -157,6 +187,7 @@ function RankingResult({
 
 function RankedAccountRow({ account, rank }: { account: ScoredAccount; rank: number }) {
   const lifecycleColor = getLifecycleColor(account.lifecycle);
+  const bandColor = getQuotaBandColor(account.quotaBand);
 
   return (
     <div
@@ -176,11 +207,19 @@ function RankedAccountRow({ account, rank }: { account: ScoredAccount; rank: num
           <span className={`rounded-full px-2 py-0.5 text-[10px] font-semibold ${lifecycleColor}`}>
             {account.lifecycle}
           </span>
+          {account.quotaBand !== "unknown" && (
+            <span className={`rounded-full px-2 py-0.5 text-[10px] font-semibold ${bandColor}`}>
+              {quotaBandLabel(account.quotaBand)}
+            </span>
+          )}
         </div>
         <div className="mt-0.5 flex flex-wrap gap-3 text-[10px] text-[#8293aa]">
           <span>Q: {account.quotaScore}</span>
           <span>L: {account.lifecycleScore}</span>
           <span>R: {account.repoScore}</span>
+          {account.effectiveHeadroom !== null && (
+            <span>Eff: {Math.round(account.effectiveHeadroom)}%</span>
+          )}
           {account.dailyPercentage !== null && (
             <span>Daily: {Math.round(account.dailyPercentage)}%</span>
           )}
@@ -201,6 +240,62 @@ function RankedAccountRow({ account, rank }: { account: ScoredAccount; rank: num
       </div>
     </div>
   );
+}
+
+function quotaBandLabel(band: QuotaBand): string {
+  switch (band) {
+    case "healthy": return "healthy";
+    case "draining": return "draining \u226420%";
+    case "checkpoint": return "checkpoint \u226410%";
+    case "forced-handoff": return "forced handoff \u22645%";
+    case "stop-work": return "stop-work \u22642%";
+    case "exhausted": return "exhausted";
+    case "unknown": return "no quota";
+  }
+}
+
+function getQuotaBandColor(band: QuotaBand): string {
+  switch (band) {
+    case "healthy":
+      return "border-emerald-400/20 bg-emerald-400/10 text-emerald-200";
+    case "draining":
+      return "border-amber-400/20 bg-amber-400/10 text-amber-200";
+    case "checkpoint":
+      return "border-orange-400/20 bg-orange-400/10 text-orange-200";
+    case "forced-handoff":
+      return "border-rose-400/20 bg-rose-400/10 text-rose-200";
+    case "stop-work":
+      return "border-red-500/30 bg-red-500/15 text-red-200";
+    case "exhausted":
+      return "border-zinc-400/20 bg-zinc-400/10 text-zinc-300";
+    case "unknown":
+      return "border-white/10 bg-white/5 text-[#aab5c4]";
+  }
+}
+
+function quotaBandWarning(band: QuotaBand): { title: string; body: string; tone: string } | null {
+  switch (band) {
+    case "checkpoint":
+      return {
+        title: "Checkpoint zone — prepare a milestone push soon",
+        body: "Effective headroom is at or below 10%. Per the sync contract, the next agent should push a clean checkpoint before continuing.",
+        tone: "border-orange-400/30 bg-orange-400/10 text-orange-200",
+      };
+    case "forced-handoff":
+      return {
+        title: "Forced handoff zone — push branch and hand off",
+        body: "Effective headroom is at or below 5%. Push the current working branch, update docs/handoffs/LATEST.md, and avoid starting any new implementation slice.",
+        tone: "border-rose-400/30 bg-rose-400/10 text-rose-200",
+      };
+    case "stop-work":
+      return {
+        title: "Stop-work zone — finalize sync only",
+        body: "Effective headroom is at or below 2%. Only finalize push and handoff if still possible. Do not start new work.",
+        tone: "border-red-500/40 bg-red-500/15 text-red-200",
+      };
+    default:
+      return null;
+  }
 }
 
 function getLifecycleColor(lifecycle: string): string {

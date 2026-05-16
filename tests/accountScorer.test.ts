@@ -197,3 +197,136 @@ test("resolveLifecycle treats expired rate-limit as active", async () => {
   );
   assert.equal(lifecycle, "active");
 });
+
+test("effectiveHeadroom returns the tighter of daily and weekly remaining", async () => {
+  const { effectiveHeadroom } = await import("../src/lib/accountScorer.ts");
+  assert.equal(effectiveHeadroom({ dailyPercentage: 80, weeklyPercentage: 40 }), 40);
+  assert.equal(effectiveHeadroom({ dailyPercentage: 12, weeklyPercentage: 70 }), 12);
+});
+
+test("effectiveHeadroom falls back to the present value when one side is null", async () => {
+  const { effectiveHeadroom } = await import("../src/lib/accountScorer.ts");
+  assert.equal(effectiveHeadroom({ dailyPercentage: null, weeklyPercentage: 25 }), 25);
+  assert.equal(effectiveHeadroom({ dailyPercentage: 50, weeklyPercentage: null }), 50);
+});
+
+test("effectiveHeadroom is null when no quota data is available", async () => {
+  const { effectiveHeadroom } = await import("../src/lib/accountScorer.ts");
+  assert.equal(effectiveHeadroom(null), null);
+  assert.equal(effectiveHeadroom({ dailyPercentage: null, weeklyPercentage: null }), null);
+});
+
+test("computeQuotaBand maps headroom to the sync-contract bands", async () => {
+  const { computeQuotaBand } = await import("../src/lib/accountScorer.ts");
+  assert.equal(computeQuotaBand(null), "unknown");
+  assert.equal(computeQuotaBand(80), "healthy");
+  assert.equal(computeQuotaBand(20.01), "healthy");
+  assert.equal(computeQuotaBand(20), "draining");
+  assert.equal(computeQuotaBand(15), "draining");
+  assert.equal(computeQuotaBand(10), "checkpoint");
+  assert.equal(computeQuotaBand(7), "checkpoint");
+  assert.equal(computeQuotaBand(5), "forced-handoff");
+  assert.equal(computeQuotaBand(3), "forced-handoff");
+  assert.equal(computeQuotaBand(2), "stop-work");
+  assert.equal(computeQuotaBand(1), "stop-work");
+  assert.equal(computeQuotaBand(0), "exhausted");
+  assert.equal(computeQuotaBand(-5), "exhausted");
+});
+
+test("scoreAccount tags healthy account with quotaBand=healthy", async () => {
+  const { scoreAccount } = await import("../src/lib/accountScorer.ts");
+  const result = scoreAccount(
+    {
+      id: "acc-h",
+      name: "Healthy",
+      quota: { dailyPercentage: 90, weeklyPercentage: 80 },
+      lifecycle: { hasCreds: true, testStatus: "valid", rateLimitedUntil: null, lastError: null },
+      repo: { assignedRepoFullName: null, assignedBranch: null },
+    },
+    { targetRepo: null },
+  );
+  assert.equal(result.quotaBand, "healthy");
+  assert.equal(result.effectiveHeadroom, 80);
+});
+
+test("scoreAccount tags 8% weekly as checkpoint band but keeps lifecycle qualified", async () => {
+  const { scoreAccount } = await import("../src/lib/accountScorer.ts");
+  const result = scoreAccount(
+    {
+      id: "acc-cp",
+      name: "Checkpoint Zone",
+      quota: { dailyPercentage: 40, weeklyPercentage: 8 },
+      lifecycle: { hasCreds: true, testStatus: "valid", rateLimitedUntil: null, lastError: null },
+      repo: { assignedRepoFullName: null, assignedBranch: null },
+    },
+    { targetRepo: null },
+  );
+  assert.equal(result.quotaBand, "checkpoint");
+  assert.equal(result.effectiveHeadroom, 8);
+  assert.equal(result.disqualified, false);
+});
+
+test("scoreAccount tags 3% effective headroom as forced-handoff", async () => {
+  const { scoreAccount } = await import("../src/lib/accountScorer.ts");
+  const result = scoreAccount(
+    {
+      id: "acc-fh",
+      name: "Forced Handoff",
+      quota: { dailyPercentage: 3, weeklyPercentage: 60 },
+      lifecycle: { hasCreds: true, testStatus: "valid", rateLimitedUntil: null, lastError: null },
+      repo: { assignedRepoFullName: null, assignedBranch: null },
+    },
+    { targetRepo: null },
+  );
+  assert.equal(result.quotaBand, "forced-handoff");
+  assert.equal(result.effectiveHeadroom, 3);
+});
+
+test("scoreAccount tags 1% effective headroom as stop-work", async () => {
+  const { scoreAccount } = await import("../src/lib/accountScorer.ts");
+  const result = scoreAccount(
+    {
+      id: "acc-sw",
+      name: "Stop Work",
+      quota: { dailyPercentage: 50, weeklyPercentage: 1 },
+      lifecycle: { hasCreds: true, testStatus: "valid", rateLimitedUntil: null, lastError: null },
+      repo: { assignedRepoFullName: null, assignedBranch: null },
+    },
+    { targetRepo: null },
+  );
+  assert.equal(result.quotaBand, "stop-work");
+  assert.equal(result.effectiveHeadroom, 1);
+});
+
+test("scoreAccount tags zero headroom as exhausted band and disqualifies", async () => {
+  const { scoreAccount } = await import("../src/lib/accountScorer.ts");
+  const result = scoreAccount(
+    {
+      id: "acc-ex",
+      name: "Exhausted",
+      quota: { dailyPercentage: 0, weeklyPercentage: 30 },
+      lifecycle: { hasCreds: true, testStatus: "valid", rateLimitedUntil: null, lastError: null },
+      repo: { assignedRepoFullName: null, assignedBranch: null },
+    },
+    { targetRepo: null },
+  );
+  assert.equal(result.quotaBand, "exhausted");
+  assert.equal(result.effectiveHeadroom, 0);
+  assert.equal(result.disqualified, true);
+});
+
+test("scoreAccount returns quotaBand=unknown when no quota data is available", async () => {
+  const { scoreAccount } = await import("../src/lib/accountScorer.ts");
+  const result = scoreAccount(
+    {
+      id: "acc-u",
+      name: "Unknown Quota",
+      quota: null,
+      lifecycle: { hasCreds: true, testStatus: "valid", rateLimitedUntil: null, lastError: null },
+      repo: { assignedRepoFullName: null, assignedBranch: null },
+    },
+    { targetRepo: null },
+  );
+  assert.equal(result.quotaBand, "unknown");
+  assert.equal(result.effectiveHeadroom, null);
+});

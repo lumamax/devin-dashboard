@@ -7,6 +7,22 @@
  *   3. repoReady — whether the account already has the target repo assigned (0-20 points)
  *
  * Higher total = better candidate for the next cloud worker task.
+ *
+ * Each account is also tagged with a `quotaBand` derived from the effective
+ * quota headroom (the tighter of daily / weekly remaining). Bands follow the
+ * canonical thresholds in `docs/supervisor-cloud-sync-contract.md`:
+ *
+ *   healthy        > 20%
+ *   draining       10% < eff <= 20%
+ *   checkpoint     5% < eff <= 10%
+ *   forced-handoff 2% < eff <= 5%
+ *   stop-work      0% < eff <= 2%
+ *   exhausted      eff <= 0%
+ *   unknown        no quota data
+ *
+ * The band is a separate signal from `lifecycle` — lifecycle answers
+ * "can this account take work at all?" while quotaBand answers
+ * "where is this account in the checkpoint / handoff lifecycle?".
  */
 
 export type AccountQuotaInput = {
@@ -34,6 +50,8 @@ export type ScoredAccount = {
   lifecycleScore: number;
   repoScore: number;
   lifecycle: AccountLifecycle;
+  quotaBand: QuotaBand;
+  effectiveHeadroom: number | null;
   dailyPercentage: number | null;
   weeklyPercentage: number | null;
   assignedRepoFullName: string | null;
@@ -48,6 +66,15 @@ export type AccountLifecycle =
   | "errored"
   | "exhausted"
   | "draining";
+
+export type QuotaBand =
+  | "unknown"
+  | "healthy"
+  | "draining"
+  | "checkpoint"
+  | "forced-handoff"
+  | "stop-work"
+  | "exhausted";
 
 export type ScoreAccountInput = {
   id: string;
@@ -76,6 +103,8 @@ export function scoreAccount(
   const lifecycleScore = computeLifecycleScore(lifecycle);
   const repoScore = computeRepoScore(input.repo, options.targetRepo);
   const score = disqualified ? 0 : quotaScore + lifecycleScore + repoScore;
+  const headroom = effectiveHeadroom(input.quota);
+  const quotaBand = computeQuotaBand(headroom);
 
   return {
     accountId: input.id,
@@ -85,6 +114,8 @@ export function scoreAccount(
     lifecycleScore,
     repoScore,
     lifecycle,
+    quotaBand,
+    effectiveHeadroom: headroom,
     dailyPercentage: input.quota?.dailyPercentage ?? null,
     weeklyPercentage: input.quota?.weeklyPercentage ?? null,
     assignedRepoFullName: input.repo.assignedRepoFullName,
@@ -134,6 +165,39 @@ export function resolveLifecycle(
   if (lc.testStatus === "valid" || lc.testStatus === "ok") return "active";
 
   return "active";
+}
+
+/**
+ * Effective remaining quota headroom for routing / band decisions.
+ *
+ * Per `docs/supervisor-cloud-sync-contract.md`, the tighter of daily and
+ * weekly remaining percentage drives band selection. Returns `null` when
+ * no usable quota data is available so callers can show "unknown" instead
+ * of pretending the account is healthy.
+ */
+export function effectiveHeadroom(quota: AccountQuotaInput | null): number | null {
+  if (!quota) return null;
+  const daily = quota.dailyPercentage;
+  const weekly = quota.weeklyPercentage;
+  if (daily === null && weekly === null) return null;
+  if (daily === null) return weekly;
+  if (weekly === null) return daily;
+  return Math.min(daily, weekly);
+}
+
+/**
+ * Map effective headroom percent to a sync-contract quota band.
+ *
+ * Mirrors the thresholds in `docs/supervisor-cloud-sync-contract.md`.
+ */
+export function computeQuotaBand(headroomPercent: number | null): QuotaBand {
+  if (headroomPercent === null) return "unknown";
+  if (headroomPercent <= 0) return "exhausted";
+  if (headroomPercent <= 2) return "stop-work";
+  if (headroomPercent <= 5) return "forced-handoff";
+  if (headroomPercent <= 10) return "checkpoint";
+  if (headroomPercent <= 20) return "draining";
+  return "healthy";
 }
 
 function computeQuotaScore(quota: AccountQuotaInput | null): number {
