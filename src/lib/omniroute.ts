@@ -17,6 +17,8 @@ export type AccountSummary = {
   hasCreds: boolean;
   orgId: string | null;
   bearerPreview: string | null;
+  assignedRepoFullName?: string | null;
+  assignedBranch?: string | null;
 };
 
 /**

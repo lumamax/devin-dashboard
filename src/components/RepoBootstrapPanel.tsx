@@ -1,6 +1,12 @@
 "use client";
 
 import { useEffect, useState, type ReactNode } from "react";
+import {
+  getActiveRepoSelection,
+  saveActiveRepoSelection,
+  type ActiveRepoSelection,
+} from "@/lib/activeRepo";
+import { buildCloudAgentPrompt } from "@/lib/bootstrapPrompt";
 
 type RepositoryOption = {
   id: number;
@@ -38,6 +44,7 @@ type GitHubStatusResponse = {
 type BootstrapResponse = {
   ok: boolean;
   error?: string;
+  prompt?: string;
   bootstrap?: {
     owner: string;
     repo: string;
@@ -88,6 +95,13 @@ export function RepoBootstrapPanel() {
     void loadStatus();
   }, []);
 
+  useEffect(() => {
+    const selection = normalizeSelection(owner, repo, branch);
+    if (selection) {
+      saveActiveRepoSelection(selection);
+    }
+  }, [owner, repo, branch]);
+
   async function loadStatus() {
     setStatus({ kind: "loading" });
     try {
@@ -100,6 +114,14 @@ export function RepoBootstrapPanel() {
       const repositories = normalizeRepositories(json.repositories);
       const ownerHint = pickOwnerHint(json);
       const firstRepo = repositories[0] || null;
+      const currentSelection = normalizeSelection(owner, repo, branch);
+      const savedSelection = getActiveRepoSelection();
+      const fallbackSelection = normalizeSelection(
+        firstRepo?.owner || ownerHint || "lumamax",
+        firstRepo?.repo || "devin-dashboard",
+        firstRepo?.defaultBranch || "main",
+      );
+      const nextSelection = currentSelection || savedSelection || fallbackSelection;
 
       setStatus({
         kind: "ready",
@@ -111,9 +133,12 @@ export function RepoBootstrapPanel() {
         error: json.error || null,
       });
 
-      setOwner((current) => current || firstRepo?.owner || ownerHint || "lumamax");
-      setRepo((current) => current || firstRepo?.repo || "devin-dashboard");
-      setBranch((current) => current || firstRepo?.defaultBranch || "main");
+      if (nextSelection) {
+        setOwner(nextSelection.owner);
+        setRepo(nextSelection.repo);
+        setBranch(nextSelection.branch);
+        saveActiveRepoSelection(nextSelection);
+      }
     } catch (err) {
       setStatus({
         kind: "error",
@@ -156,7 +181,7 @@ export function RepoBootstrapPanel() {
         cloneUrl: json.bootstrap.cloneUrl,
         expiresAt: json.bootstrap.expiresAt,
         commands: json.bootstrap.commands,
-        prompt: buildAgentPrompt(json.bootstrap),
+        prompt: json.prompt || buildCloudAgentPrompt(json.bootstrap),
       });
     } catch (err) {
       setBootstrap({
@@ -210,7 +235,11 @@ export function RepoBootstrapPanel() {
           </div>
 
           <p className="mt-2 max-w-2xl text-sm leading-6 text-[#95a3b6]">
-            Нажми один раз, получи готовую команду и короткий prompt для нового Devin cloud-agent. Старые GitHub-сессии переносить не нужно.
+            Выбери общее рабочее репо один раз, а потом запускай конкретный Devin-аккаунт ниже уже с готовым seed prompt. Старые GitHub-сессии переносить не нужно.
+          </p>
+
+          <p className="mt-2 text-xs leading-5 text-[#7f91a8]">
+            Это активное репо используют кнопки <b className="text-[#dce6f1]">«Открыть + репо»</b> у аккаунтов ниже.
           </p>
         </div>
 
@@ -314,6 +343,18 @@ export function RepoBootstrapPanel() {
                       placeholder="main"
                     />
                   </label>
+                </div>
+
+                <div className="mt-3 flex flex-wrap items-center gap-2 text-xs text-[#8193aa]">
+                  <span className="rounded-full border border-white/10 bg-white/[0.04] px-2.5 py-1 uppercase tracking-[0.14em] text-[#7f91a8]">
+                    Активное репо
+                  </span>
+                  <span className="rounded-full border border-emerald-400/20 bg-emerald-400/10 px-3 py-1 font-mono text-emerald-100">
+                    {owner.trim() || "owner"}/{repo.trim() || "repo"}
+                  </span>
+                  <span className="rounded-full border border-white/10 bg-white/[0.04] px-3 py-1 font-mono text-[#d6e0ed]">
+                    {branch.trim() || "main"}
+                  </span>
                 </div>
 
                 <div className="mt-3 flex flex-wrap items-center gap-3">
@@ -428,24 +469,28 @@ function normalizeRepositories(input: GitHubStatusResponse["repositories"]): Rep
   return out;
 }
 
-function pickOwnerHint(status: GitHubStatusResponse): string | null {
-  return status.app?.owner?.login || status.ownerHint || null;
+function normalizeSelection(
+  owner: string | null | undefined,
+  repo: string | null | undefined,
+  branch: string | null | undefined,
+): ActiveRepoSelection | null {
+  const trimmedOwner = owner?.trim() || "";
+  const trimmedRepo = repo?.trim() || "";
+  const trimmedBranch = branch?.trim() || "main";
+
+  if (!trimmedOwner || !trimmedRepo) {
+    return null;
+  }
+
+  return {
+    owner: trimmedOwner,
+    repo: trimmedRepo,
+    branch: trimmedBranch,
+  };
 }
 
-function buildAgentPrompt(bootstrap: NonNullable<BootstrapResponse["bootstrap"]>) {
-  return [
-    `Clone ${bootstrap.owner}/${bootstrap.repo} and continue from the shared git state.`,
-    "",
-    ...bootstrap.commands,
-    "",
-    "Then read these files in order:",
-    "AGENTS.md",
-    "README.md",
-    "docs/cloud-agent-operating-model.md",
-    "docs/handoffs/LATEST.md",
-    "",
-    "After reading them, continue the current task from the latest handoff and current branch state. Do not start from scratch and do not rely on an old VM state.",
-  ].join("\n");
+function pickOwnerHint(status: GitHubStatusResponse): string | null {
+  return status.app?.owner?.login || status.ownerHint || null;
 }
 
 function formatExpiry(iso: string) {

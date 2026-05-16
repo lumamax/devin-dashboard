@@ -77,6 +77,29 @@ test("devinGet retries with refreshed bearer on 401", async () => {
   }
 });
 
+test("devinGetText returns non-JSON bodies for NDJSON-style endpoints", async () => {
+  const { devinGetText } = await import("../src/lib/devinApi.ts");
+  globalThis.fetch = (async () =>
+    new Response('{"type":"status_update"}\n{"type":"devin_message"}\n', {
+      status: 200,
+      headers: { "content-type": "application/x-ndjson" },
+    })) as typeof fetch;
+  try {
+    const result = await devinGetText("/api/events/devin-x/stream?order=desc", {
+      cookie: "wos-session=abc",
+      bearer: "bearer-jwt-1",
+      orgId: "org-x",
+    });
+    assert.equal(result.ok, true);
+    if (result.ok) {
+      assert.equal(result.data.includes('"type":"status_update"'), true);
+      assert.equal(result.data.includes('"type":"devin_message"'), true);
+    }
+  } finally {
+    globalThis.fetch = ORIG_FETCH;
+  }
+});
+
 test("devinGet surfaces non-401 errors without refresh", async () => {
   const { devinGet, DevinApiError } = await import("../src/lib/devinApi.ts");
   globalThis.fetch = (async () => new Response("nope", { status: 500 })) as typeof fetch;

@@ -1,4 +1,5 @@
 import { NextRequest, NextResponse } from "next/server";
+import { buildCloudAgentPrompt } from "@/lib/bootstrapPrompt";
 import {
   GitHubAppError,
   MissingGitHubAppConfigError,
@@ -33,7 +34,7 @@ export async function POST(request: NextRequest) {
     });
 
     return NextResponse.json(
-      { ok: true, bootstrap },
+      { ok: true, bootstrap, prompt: buildCloudAgentPrompt(bootstrap) },
       {
         headers: {
           "Cache-Control": "no-store, no-cache, must-revalidate",

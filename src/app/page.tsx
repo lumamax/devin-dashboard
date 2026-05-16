@@ -13,19 +13,25 @@ export default async function Home() {
 
   try {
     const stored = await listStoredAccounts();
-    accounts = stored.map((a) => ({
-      id: a.id,
-      name: a.name,
-      priority: a.priority,
-      testStatus: a.testStatus,
-      rateLimitedUntil: a.rateLimitedUntil,
-      lastError: a.lastError,
-      createdAt: a.createdAt,
-      updatedAt: a.updatedAt,
-      hasCreds: a.creds !== null,
-      orgId: a.creds?.orgId || null,
-      bearerPreview: a.creds?.bearer ? `${a.creds.bearer.slice(0, 16)}…` : null,
-    }));
+    accounts = stored.map((a) => {
+      const repoAssignment = readRepoAssignment(a.providerSpecificData);
+
+      return {
+        id: a.id,
+        name: a.name,
+        priority: a.priority,
+        testStatus: a.testStatus,
+        rateLimitedUntil: a.rateLimitedUntil,
+        lastError: a.lastError,
+        createdAt: a.createdAt,
+        updatedAt: a.updatedAt,
+        hasCreds: a.creds !== null,
+        orgId: a.creds?.orgId || null,
+        bearerPreview: a.creds?.bearer ? `${a.creds.bearer.slice(0, 16)}…` : null,
+        assignedRepoFullName: repoAssignment?.fullName || null,
+        assignedBranch: repoAssignment?.branch || null,
+      };
+    });
   } catch (err: unknown) {
     error = err instanceof Error ? err.message : "Unknown error";
   }
@@ -105,7 +111,7 @@ export default async function Home() {
           </div>
         ) : (
           <>
-            <div className="hidden border-b border-white/10 px-4 py-3 text-[11px] font-semibold uppercase tracking-[0.18em] text-[#748399] xl:grid xl:grid-cols-[minmax(280px,1.08fr)_minmax(330px,1fr)_minmax(236px,0.72fr)_140px] xl:gap-4 xl:px-5">
+            <div className="hidden border-b border-white/10 px-4 py-3 text-[11px] font-semibold uppercase tracking-[0.18em] text-[#748399] xl:grid xl:grid-cols-[minmax(280px,1.08fr)_minmax(330px,1fr)_minmax(236px,0.72fr)_180px] xl:gap-4 xl:px-5">
               <span>Аккаунт</span>
               <span>Сессия</span>
               <span>Квота</span>
@@ -126,6 +132,35 @@ export default async function Home() {
       </footer>
     </main>
   );
+}
+
+function readRepoAssignment(providerSpecificData: Record<string, unknown> | null) {
+  const dashboard = providerSpecificData?.devinDashboard;
+  if (!dashboard || typeof dashboard !== "object" || Array.isArray(dashboard)) {
+    return null;
+  }
+
+  const repoAssignment = (dashboard as Record<string, unknown>).repoAssignment;
+  if (!repoAssignment || typeof repoAssignment !== "object" || Array.isArray(repoAssignment)) {
+    return null;
+  }
+
+  const record = repoAssignment as Record<string, unknown>;
+  const fullName = typeof record.fullName === "string" && record.fullName.trim()
+    ? record.fullName.trim()
+    : typeof record.owner === "string" && typeof record.repo === "string"
+      ? `${record.owner.trim()}/${record.repo.trim()}`
+      : null;
+  const branch = typeof record.branch === "string" && record.branch.trim() ? record.branch.trim() : null;
+
+  if (!fullName) {
+    return null;
+  }
+
+  return {
+    fullName,
+    branch,
+  };
 }
 
 function StatCard({

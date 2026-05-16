@@ -37,7 +37,17 @@ export async function devinGet<T = unknown>(
 ): Promise<
   { ok: true; data: T; creds: DevinCreds } | { ok: false; error: DevinApiError }
 > {
-  return devinRequest<T>("GET", path, undefined, creds, onRefresh);
+  return devinRequest<T>("GET", path, undefined, creds, onRefresh, "json");
+}
+
+export async function devinGetText(
+  path: string,
+  creds: DevinCreds,
+  onRefresh?: RefreshHook,
+): Promise<
+  { ok: true; data: string; creds: DevinCreds } | { ok: false; error: DevinApiError }
+> {
+  return devinRequest<string>("GET", path, undefined, creds, onRefresh, "text");
 }
 
 export async function devinPost<T = unknown>(
@@ -48,7 +58,7 @@ export async function devinPost<T = unknown>(
 ): Promise<
   { ok: true; data: T; creds: DevinCreds } | { ok: false; error: DevinApiError }
 > {
-  return devinRequest<T>("POST", path, body, creds, onRefresh);
+  return devinRequest<T>("POST", path, body, creds, onRefresh, "json");
 }
 
 async function devinRequest<T>(
@@ -57,6 +67,7 @@ async function devinRequest<T>(
   body: unknown,
   creds: DevinCreds,
   onRefresh?: RefreshHook,
+  responseType: "json" | "text" = "json",
 ): Promise<
   { ok: true; data: T; creds: DevinCreds } | { ok: false; error: DevinApiError }
 > {
@@ -76,6 +87,13 @@ async function devinRequest<T>(
       if (onRefresh) await onRefresh(nextCreds);
       response = await fetch(url, buildInit(method, body, nextCreds));
       if (response.ok) {
+        if (responseType === "text") {
+          return {
+            ok: true,
+            data: (await response.text()) as T,
+            creds: nextCreds,
+          };
+        }
         return {
           ok: true,
           data: (await response.json()) as T,
@@ -98,9 +116,10 @@ async function devinRequest<T>(
     };
   }
 
-  // Some endpoints (event stream) are NDJSON, not JSON. The caller picks
-  // the right method (devinGet vs devinGetText) — for now this wrapper is
-  // JSON-only and we'll add a text variant when we add chat reading.
+  if (responseType === "text") {
+    return { ok: true, data: (await response.text()) as T, creds };
+  }
+
   try {
     const data = (await response.json()) as T;
     return { ok: true, data, creds };

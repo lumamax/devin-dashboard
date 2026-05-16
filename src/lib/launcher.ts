@@ -30,6 +30,8 @@ export type LaunchOptions = {
   profileDirectory?: string;
   /** Override target URL. Defaults to https://app.devin.ai/. */
   url?: string;
+  /** Optional Chrome remote debugging port for CDP automation. */
+  remoteDebuggingPort?: number;
 };
 
 export type LaunchResult = {
@@ -122,6 +124,7 @@ function buildLaunchArgs(
   userDataDir: string,
   url: string,
   profileDirectory?: string,
+  remoteDebuggingPort?: number,
 ): string[] {
   const args = [
     `--user-data-dir=${userDataDir}`,
@@ -133,6 +136,10 @@ function buildLaunchArgs(
 
   if (profileDirectory) {
     args.push(`--profile-directory=${profileDirectory}`);
+  }
+
+  if (typeof remoteDebuggingPort === "number") {
+    args.push(`--remote-debugging-port=${remoteDebuggingPort}`);
   }
 
   args.push(url);
@@ -164,7 +171,12 @@ export function launchChrome(options: LaunchOptions): LaunchResult {
 
   const child = spawn(
     binaryPath,
-    buildLaunchArgs(profileDir, url, options.profileDirectory),
+    buildLaunchArgs(
+      profileDir,
+      url,
+      options.profileDirectory,
+      options.remoteDebuggingPort,
+    ),
     {
       detached: true,
       stdio: "ignore",
