@@ -127,6 +127,17 @@ the cookies SQLite file is locked while Chrome is running. The endpoint
 returns a clear "sqlite_query_failed" error if so. The auto-login wizard
 above doesn't have this limitation.
 
+
+## GitHub App broker MVP
+
+The repo now includes a local-only GitHub App broker scaffold:
+
+- `GET /api/github-app/status` — configuration and installation diagnostics
+- `POST /api/github-app/token` — mint a short-lived installation token
+- `POST /api/github-app/bootstrap` — mint a token plus return clone/bootstrap commands for one repo
+
+These endpoints are intended for localhost use only while the long-term control plane is being built.
+
 ## Security model
 
 This dashboard is **localhost-only** and the dev / start scripts bind Next.js
@@ -143,7 +154,7 @@ to `localhost:29128` (not `0.0.0.0`). Do not expose it to the public.
 ## Tests
 
 ```bash
-node --import tsx/esm --test tests/launcher.test.ts tests/connectionStore.test.ts tests/devinApi.test.ts
+node --import tsx/esm --test tests/launcher.test.ts tests/connectionStore.test.ts tests/devinApi.test.ts tests/githubApp.test.ts
 npx tsc --noEmit
 npx next build
 ```
