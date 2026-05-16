@@ -33,10 +33,11 @@ Read these files first:
 
 1. `README.md`
 2. `docs/cloud-agent-operating-model.md`
-3. `docs/multi-account-git-access.md`
-4. `docs/github-app-control-plane-plan.md`
-5. `docs/handoffs/LATEST.md`
-6. `docs/handoffs/TEMPLATE.md`
+3. `docs/devin-control-plane-target.md`
+4. `docs/multi-account-git-access.md`
+5. `docs/github-app-control-plane-plan.md`
+6. `docs/handoffs/LATEST.md`
+7. `docs/handoffs/TEMPLATE.md`
 
 If repo access is missing, stop immediately and report:
 
@@ -75,5 +76,6 @@ Keep the handoff focused on outcomes, not transcript. Include:
 - The dashboard selects accounts with available quota.
 - Shared Devin-org repo access is currently blocked by seat allocation on the existing plan.
 - The current practical access model is `machine user + per-account SSH keys`, but the target long-term contour is the GitHub App plan in `docs/github-app-control-plane-plan.md`.
+- The current target stack is: OmniRoute as routing/data plane, Devin Dashboard as Devin-specific control plane, GitHub App broker as repo-access plane, and private GitHub plus handoffs as the durable continuity layer.
 - The supervisor may later move to another agent, but for now local Codex is the authoritative coordinator.
 - The immediate pilot repos are `lumamax/devin-dashboard` and local `OmniRoute` work that has not yet been fully published.

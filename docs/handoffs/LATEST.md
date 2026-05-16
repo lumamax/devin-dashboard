@@ -2,76 +2,106 @@
 
 ## Task
 
-Continue the multi-account Devin workflow and preserve continuity after the original Devin session hit quota.
+Continue `lumamax/devin-dashboard` as the active control-plane pilot for multi-account Devin work.
+
+The current local objective is no longer just "store multiple Devin accounts".
+The active objective is to turn those accounts into interchangeable cloud workers that can continue one shared git contour with handoffs, repo bootstrap, and quota-aware routing.
 
 ## Completed
 
-- The original suspended Devin session was inspected and its current outcome was recovered.
-- Local Devin Dashboard accounts were checked for live quota.
-- Accounts with available weekly quota were identified: `ghoulgpt4` and `ghoulgpt5`.
-- Model availability was confirmed on those free accounts: `Opus 4.7`, `GPT-5.5`, `Fast`, `Lite`.
-- The GitHub connect flow was tested end to end on `ghoulgpt4`.
-- The `lumamax` owner selection flow was reached successfully.
-- A join request to the `lumamax` Devin org was submitted from the free account.
-- That join request was approved from the `lumamax` admin side.
-- After approval, the routed free account landed on `No seat allocated` inside the `lumamax` Devin org.
-- The real blocker was therefore confirmed: shared Devin-org access is blocked by seat allocation on the current plan, not by GitHub cookies and not by broken GitHub auth.
-- The operating model was updated to recommend `machine user + per-account SSH keys` for the current pilot.
-- A dedicated long-term GitHub App control-plane plan was written for the next implementation phase.
+- Pushed current dashboard work to `main` at commit `1a48b49`.
+- Stabilized the local-only dashboard contour on `http://127.0.0.1:29128/`.
+- Confirmed that Devin web credentials are stored as `devin-web` provider connections through OmniRoute.
+- Confirmed live quota readout and model visibility per account.
+- Confirmed quota semantics used by Devin in this contour:
+  - `100%` means fully used
+  - `0%` means headroom remains
+- Added and validated per-account session control-plane endpoints:
+  - `GET /api/accounts/[id]/sessions`
+  - `GET /api/accounts/[id]/sessions/[sessionId]`
+  - `GET /api/accounts/[id]/sessions/[sessionId]/events`
+  - `GET /api/accounts/[id]/sessions/[sessionId]/prs`
+- Fixed Devin payload parsing for real web responses:
+  - session lists use `result`
+  - status may arrive in `latest_status_contents`
+  - event stream may arrive as one JSON payload instead of NDJSON
+- Confirmed the UI can now show:
+  - recent sessions
+  - selected session summary
+  - session status
+  - PR references
+  - event-derived summary blocks
+- Added repo assignment / bootstrap pieces:
+  - GitHub App broker panel
+  - repo bootstrap prompt generation
+  - per-account repo assignment state
+  - connect-repo route
+  - session seeding helpers
+- Captured the architecture decision that this repo is the Devin-specific control plane, not a replacement for OmniRoute.
 
 ## Git state
 
 - Repository: `lumamax/devin-dashboard`
-- Active branch target: `main`
-- Existing PR from prior Devin work: `PR #1` in `lumamax/devin-dashboard`
-- Separate unpublished local work also exists in local `OmniRoute`, outside this repo
+- Branch: `main`
+- Current commit: `1a48b49`
+- Remote: `origin https://github.com/lumamax/devin-dashboard.git`
+- Push state: `HEAD` is pushed and `origin/main` matches local `main`
+- PR status: there is an older open `PR #1` referenced inside recovered Devin session history, but the current local work was pushed directly to `main`
 
 ## Validation
 
-- Verified dashboard API account inventory locally
-- Verified per-account quota locally via dashboard API
-- Verified model availability on free accounts
-- Verified the old suspended session summary through the Devin web session API
-- Verified the GitHub connection flow and owner selection flow through live Devin browser sessions
-- Verified join-request approval from the `lumamax` admin side
-- Verified post-approval `No seat allocated` blocker on the free account
+- `npm test` — passing (`23/23`)
+- `npm run typecheck` — passing
+- `npm run build` — passing
+- Local dashboard server verified on `127.0.0.1:29128`
+- Live API spot checks verified for:
+  - account inventory
+  - quota data
+  - model labels
+  - recent sessions
+  - session details
+  - PR data
+  - event summaries
 
-## Important continuity notes
+## Architecture decisions
 
-- Devin quota in this workflow is interpreted as `used`, not `remaining`
-- `100% used` means exhausted
-- `0% used` means available headroom
-- Do not try to preserve prior VM state as the primary continuity mechanism
-- Preserve continuity through shared git state and concise handoff only
-- A private repo URL alone is not enough for the next cloud agent
-- The next cloud agent also needs working git credentials for the private repo
+- Do not treat this repo as a generic router.
+- The current canonical stack is:
+  1. `OmniRoute` = routing and quota-aware execution plane
+  2. `Devin Dashboard` = Devin-specific control plane and operator UI
+  3. `GitHub App broker` = short-lived repo access plane
+  4. private GitHub under `lumamax` = durable source of truth
+  5. handoff docs = continuity between cloud sessions
+- Do not preserve continuity through hidden VM state.
+- Preserve continuity through git state, repo bootstrap, and short factual handoffs.
+- Shared Devin-org access is still blocked by seat allocation on the current plan.
+- Current practical repo-access model remains:
+  - near term: machine user + per-account SSH keys if needed
+  - target: GitHub App installation tokens issued by the control plane
 
-## Architecture decision
+## Important context for the next agent
 
-For the current pilot:
+- The question "are we reinventing OmniRoute?" was resolved as follows:
+  - OmniRoute already covers a large part of quota-aware routing and context relay.
+  - This repo adds the missing Devin-specific orchestration layer: captured web sessions, Chrome-profile launch, account/session inspection, repo assignment, and GitHub bootstrap.
+- Therefore the right direction is not to collapse everything into OmniRoute immediately.
+- First stabilize the Devin control plane here.
+- Later move mature routing primitives back into OmniRoute once the Devin workflow is proven.
 
-- do not rely on shared Devin-org membership as the primary repo-access mechanism
-- use a dedicated GitHub machine user, for example `lumamax-bot`
-- give each active Devin account its own SSH keypair
-- store the matching private key inside that Devin account's secrets
-- revoke per-account SSH keys during account retirement instead of rotating one global shared credential
+## Key docs to read first
 
-See `docs/multi-account-git-access.md` for the current-state rationale and `docs/github-app-control-plane-plan.md` for the long-term build plan.
-
-## GitHub App status
-
-- Private GitHub App created under `@lumamax`: `lumamax-devin-control`
-- App id: `3731868`
-- Installed on selected repository: `lumamax/devin-dashboard`
-- Installation id: `132787984`
-- Local broker MVP endpoints verified on the dashboard:
-  - `GET /api/github-app/status`
-  - `POST /api/github-app/token`
-  - `POST /api/github-app/bootstrap`
-- Local operator machine has working `.env.local` wired to the GitHub App and OmniRoute management API
-- Dashboard UI now includes a local repo-bootstrap panel that lists accessible GitHub App repos, generates short-lived clone commands, and produces a copy-ready prompt for the next Devin cloud-agent
-- Secrets were kept local only and were not committed into git
+1. `README.md`
+2. `AGENTS.md`
+3. `docs/cloud-agent-operating-model.md`
+4. `docs/devin-control-plane-target.md`
+5. `docs/multi-account-git-access.md`
+6. `docs/github-app-control-plane-plan.md`
 
 ## Next best action
 
-Use `POST /api/github-app/bootstrap` as the canonical repo bootstrap path for the next free Devin cloud agent, then have that session clone `lumamax/devin-dashboard`, read this handoff, and continue implementation from shared git state instead of trying to reuse the previous VM.
+Build the next operator-grade step in this repo:
+
+- add a `pick-best-account` control-plane path that scores active Devin accounts by usable quota, lifecycle state, and repo readiness
+- surface that in the dashboard so the supervisor can choose the next cloud worker without manually inspecting each card
+
+After that, the next phase is session bootstrap into a new Devin worker from shared git + handoff, not from reused VM state.

@@ -167,6 +167,7 @@ If this repo is being used as the current multi-account Devin pilot, start here:
 
 - `AGENTS.md`
 - `docs/cloud-agent-operating-model.md`
+- `docs/devin-control-plane-target.md`
 - `docs/multi-account-git-access.md`
 - `docs/github-app-control-plane-plan.md`
 - `docs/handoffs/LATEST.md`

@@ -23,6 +23,12 @@ One paragraph on the exact task or delivery contour.
 - Build / typecheck status:
 - Anything not validated:
 
+## Architecture decisions
+
+- What stack / boundary decisions were confirmed:
+- What should stay in OmniRoute vs this repo:
+- What continuity assumptions are safe for the next cloud agent:
+
 ## Blockers / risks
 
 - Missing access:
