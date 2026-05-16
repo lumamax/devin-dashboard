@@ -455,10 +455,10 @@ export function AccountCard({ account }: { account: AccountSummary }) {
       setStatus("success");
       setStatusMessage(
         autoSeedOk
-          ? `Аккаунт открыт, репо ${fullName} закреплено, prompt уже отправлен в Devin.`
+          ? `Аккаунт открыт, репо ${fullName} закреплено, prompt отправлен в Devin. Репозиторий внутри VM появится только после того, как агент реально выполнит git clone.`
           : copied
-            ? `Аккаунт открыт, репо ${fullName} закреплено, prompt скопирован${autoSeedReasonText ? `, ${autoSeedReasonText}` : ""}.`
-            : `Аккаунт открыт, репо ${fullName} закреплено. Prompt готов, но clipboard не сработал.`,
+            ? `Аккаунт открыт, репо ${fullName} закреплено только в дашборде. Prompt скопирован, но не подтверждён как отправленный${autoSeedReasonText ? `, ${autoSeedReasonText}` : ""}.`
+            : `Аккаунт открыт, репо ${fullName} закреплено только в дашборде. Prompt готов, но clipboard не сработал.`,
       );
     } catch (err: unknown) {
       setStatus("error");
@@ -506,6 +506,12 @@ export function AccountCard({ account }: { account: AccountSummary }) {
           <MetaLine label="Репо" value={assignedRepoFullName || "ещё не закреплено"} mono />
           <MetaLine label="Branch" value={assignedBranch || "по выбранному репо"} mono />
         </div>
+
+        {assignedRepoFullName ? (
+          <p className="text-[11px] leading-5 text-[#7f91a8]">
+            Закрепление репо здесь не равно нативному подключению в Devin. Пока агент не получил bootstrap prompt и не выполнил `git clone`, он может не видеть код и начать искать репозиторий в вебе.
+          </p>
+        ) : null}
 
         {quotaSummary && (quotaSummary.planName || quotaSummary.models.length > 0) ? (
           <div className="space-y-1.5">
@@ -589,7 +595,7 @@ export function AccountCard({ account }: { account: AccountSummary }) {
             disabled={status === "launching" || status === "connecting"}
             className="inline-flex min-w-[160px] items-center justify-center rounded-full border border-white/12 bg-white/[0.04] px-4 py-2.5 text-sm font-semibold text-[#e6eef8] transition hover:bg-white/[0.08] disabled:cursor-not-allowed disabled:opacity-50"
           >
-            {status === "connecting" ? "Готовлю…" : "Открыть + репо"}
+            {status === "connecting" ? "Готовлю…" : "Открыть + prompt"}
           </button>
         </div>
         <p className="max-w-[180px] text-right text-[11px] leading-5 text-[#7e8ea5]">
