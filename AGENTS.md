@@ -33,22 +33,23 @@ Read these files first:
 
 1. `README.md`
 2. `docs/cloud-agent-operating-model.md`
-3. `docs/handoffs/LATEST.md`
-4. `docs/handoffs/TEMPLATE.md`
+3. `docs/multi-account-git-access.md`
+4. `docs/handoffs/LATEST.md`
+5. `docs/handoffs/TEMPLATE.md`
 
 If repo access is missing, stop immediately and report:
 
 - which Devin account/org you are running under
-- which GitHub account/installation is currently connected
+- which GitHub account, machine user, or installation is currently connected
 - which repository is missing
-- whether the blocker is repo permissions, repo setup, or environment setup
+- whether the blocker is repo permissions, repo setup, secrets, or environment setup
 
 ## Working rules for cloud agents
 
 - Work from the latest remote git state, not from assumptions about prior VM state.
 - Keep changes scoped to the active task.
 - Prefer small PRs with explicit summaries over large silent rewrites.
-- If you are blocked by local-only infrastructure (localhost services, local Chrome profile state, unpublished OmniRoute changes), say so plainly and hand back to the local supervisor.
+- If you are blocked by local-only infrastructure, localhost services, local Chrome profile state, unpublished OmniRoute changes, or seat allocation inside Devin, say so plainly and hand back to the local supervisor.
 - If you depend on another repository, name it explicitly in your handoff.
 - If you open a PR, check Devin Review feedback before declaring the task complete.
 - If auto-fix is enabled, address review findings before pausing for unrelated user input.
@@ -71,5 +72,7 @@ Keep the handoff focused on outcomes, not transcript. Include:
 
 - The team is building a multi-account Devin workflow where multiple cloud agents can continue one delivery contour through shared git state and disciplined handoffs.
 - The dashboard selects accounts with available quota.
+- Shared Devin-org repo access is currently blocked by seat allocation on the existing plan.
+- The current practical access model is `machine user + per-account SSH keys`.
 - The supervisor may later move to another agent, but for now local Codex is the authoritative coordinator.
 - The immediate pilot repos are `lumamax/devin-dashboard` and local `OmniRoute` work that has not yet been fully published.

@@ -75,41 +75,64 @@ Split the system into two layers:
 
 That lets all cloud agents share one operational brain while still coding in separate product repos.
 
-## Why some Devin accounts currently cannot see the target repo
+## Confirmed access constraint
 
-The free accounts with available quota are currently connected to different GitHub installations, not to the `lumamax` GitHub owner.
+The free accounts with available quota can be routed into the `lumamax` GitHub owner flow, but the shared Devin-org path is currently blocked by seat allocation.
 
-So even though those Devin accounts have valid GitHub integrations, they do not automatically see `lumamax` private repositories.
+The tested path was:
 
-This is a Git integration contour issue, not a quota issue.
+1. start GitHub connect flow on a free account such as `ghoulgpt4`
+2. select `lumamax`
+3. submit join request
+4. approve the request from the `lumamax` admin side
+5. re-enter the `lumamax` Devin org from that free account
 
-## Correct way to give a Devin account access to the shared private repo
+Result:
 
-For each Devin account that should work on the shared contour:
+- GitHub auth was not the blocker
+- the account joined the Devin org
+- the account then landed on `No seat allocated`
 
-1. Connect the Devin account's GitHub integration to the `lumamax` GitHub owner, not to a separate per-account GitHub identity.
-2. In GitHub App configuration, grant the Devin app access to the specific `lumamax` repositories that the account should use.
-3. In Devin, go to `Settings -> Devin's Environment -> Repositories` and add the repo.
-4. Clone and configure the repo in the environment so future sessions boot with the repo available.
+So the blocker is seat allocation inside Devin, not broken cookies and not a missing GitHub login.
 
-Official references:
+## Recommended shared-repo access model
 
-- Devin GitHub integration: https://docs.devin.ai/integrations/gh
-- Devin repository setup: https://docs.devin.ai/onboard-devin/new-repo-setup
-- Devin environment configuration: https://docs.devin.ai/onboard-devin/environment
-- Devin AGENTS.md support: https://docs.devin.ai/onboard-devin/agents-md
+For the pilot, do not rely on shared Devin-org membership as the primary way to give every free account repo access.
+
+Use:
+
+- one shared private GitHub source of truth
+- one machine user for code access, for example `lumamax-bot`
+- one SSH keypair per active Devin account
+- per-account secret storage inside Devin
+- git continuity plus handoff discipline
+
+See `docs/multi-account-git-access.md` for the detailed decision record.
+
+## Private repo access rule
+
+A private repo URL alone does not transfer access.
+
+Any new cloud Devin account must have both:
+
+1. the repo URL
+2. working git credentials for that private repo
+
+Without both, the next agent cannot continue the shared contour.
 
 ## Session policy
 
 When starting a new cloud session:
 
 1. Read `AGENTS.md`
-2. Read `docs/handoffs/LATEST.md`
-3. Confirm repo access exists
-4. Confirm which branch / PR / task is current
-5. Prefer `Opus 4.7`, then `Max`, then `xhide` if available
-6. Work only against the shared git contour
-7. Before pausing, update the handoff
+2. Read `docs/cloud-agent-operating-model.md`
+3. Read `docs/multi-account-git-access.md`
+4. Read `docs/handoffs/LATEST.md`
+5. Confirm repo access exists
+6. Confirm which branch / PR / task is current
+7. Prefer `Opus 4.7`, then `Max`, then `xhide` if available
+8. Work only against the shared git contour
+9. Before pausing, update the handoff
 
 ## Handoff policy
 
@@ -132,4 +155,12 @@ At the moment:
 - old Devin context exists in a suspended session that hit quota
 - continuity must move into a new session on an account with free weekly quota
 - `ghoulgpt4` and `ghoulgpt5` currently have quota headroom
-- those accounts still need the correct `lumamax` repo access contour before they can continue work on the shared private repo
+- shared Devin-org access to `lumamax` is blocked by seat allocation on the current plan
+- the practical path forward is `machine user + per-account SSH keys`
+
+## References
+
+- Devin GitHub integration: https://docs.devin.ai/integrations/gh
+- Devin repository setup: https://docs.devin.ai/onboard-devin/new-repo-setup
+- Devin environment configuration: https://docs.devin.ai/onboard-devin/environment
+- Devin AGENTS.md support: https://docs.devin.ai/onboard-devin/agents-md
