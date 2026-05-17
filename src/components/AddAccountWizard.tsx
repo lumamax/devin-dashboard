@@ -11,8 +11,6 @@ type CaptureStatus =
   | {
       status: "captured";
       ticket: string;
-      orgId: string;
-      bearerPreview: string;
       suggestedName: string;
     }
   | { status: "saving"; ticket: string; name: string }
@@ -73,13 +71,11 @@ export function AddAccountWizard() {
             const suggestedName =
               typeof json.suggestedName === "string" && json.suggestedName.trim()
                 ? json.suggestedName.trim()
-                : `Devin ${json.orgId || "account"}`;
+                : "Devin account";
             setName(suggestedName);
             setState({
               status: "captured",
               ticket,
-              orgId: json.orgId,
-              bearerPreview: json.bearerPreview,
               suggestedName,
             });
             void autoSave(suggestedName);

@@ -10,6 +10,7 @@
     "lint": "next lint",
     "typecheck": "next typegen && tsc --noEmit",
     "test": "node --import tsx/esm --test tests/**/*.test.ts",
+    "migrate:omniroute": "node --import tsx/esm scripts/migrate-from-omniroute.ts",
     "supervisor:once": "node --import tsx/esm scripts/supervisor-watch.ts --once",
     "supervisor:watch": "node --import tsx/esm scripts/supervisor-watch.ts"
   },

@@ -1,75 +1,80 @@
 # HANDOFF
 
 ## What This Project Is
-A local-only Devin control plane for OmniRoute. It manages multiple Devin web accounts, tracks live quota, shows prepared repos, and can bootstrap repo access into Devin sessions through a backend-first flow.
+
+Devin Dashboard is a local, cross-platform control plane for multi-account Devin cloud work. It manages Devin accounts, tracks quota, prepares GitHub repositories through a GitHub App broker, and helps a supervisor pass work between cloud agents through git plus handoffs.
 
 ## Current Runtime
+
 - Local app URL: `http://127.0.0.1:29128`
 - Framework: Next.js 15 + React 18 + Tailwind
 - Remote: `https://github.com/lumamax/devin-dashboard.git`
 - Branch: `main`
-- OmniRoute storage: `~/.omniroute/storage.sqlite`
-- Provider id: `devin-web`
+- Default store: local dashboard vault at `DEVIN_DASHBOARD_HOME` or `~/.devin-dashboard`
+- Legacy store mode: `DEVIN_DASHBOARD_STORE=omniroute` only for migration
 
-## Current Product State On 2026-05-16
-- Accounts are ordered with live quota first and exhausted/problematic accounts lower.
-- The dashboard now uses a denser desktop layout with a compact left rail and cleaner account cards.
-- End-user session internals are hidden from the visible UI; backend session state is still used internally.
-- GitHub App repos are selected from a real repo list and stored as a multi-select queue.
-- Model selection for new sessions is global in the left rail and sent into repo attach for new Devin sessions.
-- Prepared repos are persisted per account and shown directly in each card.
-- Quota bars show remaining headroom, not used percentage:
-  - `100%` means full remaining quota
-  - `0%` means quota exhausted
-- Daily reset dates are already surfaced when the Devin billing payload provides them.
+## Current Product State
 
-## What Works Now
-- Add account flow launches a login window and captures Devin session credentials.
-- Chrome import can pull already logged-in Devin sessions into the local list.
-- Accounts are stored in OmniRoute under `provider_connections` as `devin-web`.
-- `connect-repo` can attach a selected repo and chosen model through the backend-first control-plane flow.
-- Previously prepared repos are remembered and avoid duplicate attach for the same account/repo combination.
-- Launch opens the most relevant prepared Devin session when possible.
-- GitHub App repo discovery is live and feeds the repo selection UI.
+- Runtime OmniRoute dependency has been removed from the default path.
+- Accounts are stored in a local cross-platform JSON vault.
+- `connectionStore` defaults to local storage and keeps OmniRoute only as explicit legacy mode.
+- The client account payload no longer includes bearer previews.
+- The main dashboard copy now says `Local Control Plane`.
+- A GitHub App setup page exists at `/setup/github-app` for public/user setup.
+- GitHub App repo discovery still feeds the repo selection UI.
+- Repo attach remains backend-first and sends the selected model into new Devin sessions.
+- Prepared repos are persisted per account and duplicate attach is avoided for the same account/repo.
+- Quota bars represent remaining headroom, not used percentage.
 
-## Verification
-- `npm test` — passing
-- `npm run typecheck` — passing
-- `npm run build` — passing
-- Wide-screen visual check captured at `/private/tmp/devin-dashboard-shots/final-pass-3.png`
+## Verification To Run
+
+```bash
+npm test
+npm run typecheck
+npm run build
+```
 
 ## Important Files
-- `src/app/page.tsx`
-- `src/components/AccountCard.tsx`
-- `src/components/AddAccountWizard.tsx`
+
+- `src/lib/dashboardStore.ts`
+- `src/lib/connectionStore.ts`
+- `src/app/setup/github-app/page.tsx`
 - `src/components/RepoBootstrapPanel.tsx`
+- `src/components/AccountCard.tsx`
 - `src/app/api/accounts/[id]/connect-repo/route.ts`
-- `src/lib/activeRepo.ts`
-- `src/lib/accountOrdering.ts`
-- `src/lib/dashboardRepoState.ts`
-- `src/lib/sessionPolicy.ts`
+- `scripts/migrate-from-omniroute.ts`
+- `docs/independent-control-plane-plan.md`
 - `docs/cloud-agent-operating-model.md`
 - `docs/supervisor-cloud-sync-contract.md`
+- `docs/browser-profile-hygiene.md`
 
 ## Safety Boundary
+
 Do not commit or upload live Devin session secrets. This repository intentionally excludes:
+
 - live Devin cookies
 - Bearer tokens
+- dashboard vault files
 - local OmniRoute SQLite data
 - Chrome profile captures
-- HAR files and temporary browser traces
+- HAR files and browser traces
+- GitHub App private keys and installation tokens
 
 If fresh live access is needed, relink accounts locally through the dashboard.
 
 ## Recommended Next Steps
-1. Keep polishing the desktop UI only after checking large-monitor density first.
-2. Continue moving attach / routing behavior to pure backend flows where possible.
-3. Discover a clean backend endpoint for posting a follow-up instruction into an already running Devin session.
-4. If desired, remove or simplify now-unused visible-session UI helpers inside `AccountCard.tsx` to reduce code surface.
-5. Keep the repo handoff contract factual and short: results, git state, next action.
+
+1. Run the full verification suite and fix any regressions from the storage split.
+2. Finish removing or isolating old debug/session UI inside `AccountCard.tsx`.
+3. Add encrypted export/import for moving the local vault between machines.
+4. Discover a clean backend endpoint for posting a follow-up instruction into an existing Devin session.
+5. Add the Devin browser profile janitor described in `docs/browser-profile-hygiene.md` so temporary Chrome profiles and code-sign clones do not accumulate.
+6. Keep public docs scrubbed of private user IDs, emails, tokens, screenshots, and local session data.
 
 ## Notes For A Cloud Agent
-Treat every Devin session as a fresh clone. Durable continuity is git + handoff, not VM persistence. Read these first before doing implementation work:
+
+Treat every Devin session as a fresh clone. Durable continuity is git plus handoff, not VM persistence. Read these first before implementation work:
+
 1. `README.md`
 2. `AGENTS.md`
 3. `HANDOFF.md`

@@ -3,7 +3,7 @@ import "./globals.css";
 
 export const metadata: Metadata = {
   title: "Devin Dashboard",
-  description: "Multi-account Devin switcher (OmniRoute companion)",
+  description: "Local Devin account and cloud-agent control plane",
 };
 
 export default function RootLayout({ children }: { children: React.ReactNode }) {

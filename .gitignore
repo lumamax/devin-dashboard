@@ -39,5 +39,14 @@ next-env.d.ts
 # har uploads (sensitive)
 /data/har-uploads/
 /data/profiles/
+/data/store/
 /output/
 /.playwright-cli/
+
+# local dashboard vaults / portable exports (sensitive)
+/.devin-dashboard/
+/dashboard.json
+/dashboard.sqlite
+*.har
+*.trace
+*.trace.zip

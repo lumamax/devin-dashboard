@@ -39,6 +39,7 @@ async function withSilencedWarn<T>(body: () => Promise<T>): Promise<T> {
 }
 
 test("listStoredAccounts filters devin-web and parses creds JSON", async () => {
+  process.env.DEVIN_DASHBOARD_STORE = "omniroute";
   process.env.OMNIROUTE_TOKEN = "test-token";
   process.env.OMNIROUTE_URL = "http://omniroute.test";
   const mod = await import("../src/lib/connectionStore.ts");
@@ -90,6 +91,7 @@ test("listStoredAccounts filters devin-web and parses creds JSON", async () => {
 });
 
 test("saveAccount sends Bearer-authed POST with JSON envelope", async () => {
+  process.env.DEVIN_DASHBOARD_STORE = "omniroute";
   process.env.OMNIROUTE_TOKEN = "test-token";
   process.env.OMNIROUTE_URL = "http://omniroute.test";
   const mod = await import("../src/lib/connectionStore.ts");
@@ -123,7 +125,8 @@ test("saveAccount sends Bearer-authed POST with JSON envelope", async () => {
   assert.equal(apiKey.orgId, "org-test");
 });
 
-test("getEnv throws when OMNIROUTE_TOKEN is missing", async () => {
+test("legacy OmniRoute mode throws when OMNIROUTE_TOKEN is missing", async () => {
+  process.env.DEVIN_DASHBOARD_STORE = "omniroute";
   delete process.env.OMNIROUTE_TOKEN;
   const mod = await import("../src/lib/connectionStore.ts");
   await assert.rejects(
@@ -138,6 +141,7 @@ test("getEnv throws when OMNIROUTE_TOKEN is missing", async () => {
 
 
 test("listStoredAccounts returns the empty API result when SQLite fallback is unavailable", async () => {
+  process.env.DEVIN_DASHBOARD_STORE = "omniroute";
   process.env.OMNIROUTE_TOKEN = "test-token";
   process.env.OMNIROUTE_URL = "http://omniroute.test";
   process.env.OMNIROUTE_DB_PATH = "/nonexistent/path/that/should/never/be/touched.sqlite";
@@ -157,6 +161,7 @@ test("listStoredAccounts returns the empty API result when SQLite fallback is un
 });
 
 test("listStoredAccounts falls back to SQLite when the API returns zero devin-web rows", async (t) => {
+  process.env.DEVIN_DASHBOARD_STORE = "omniroute";
   try {
     execFileSync("sqlite3", ["--version"], { encoding: "utf8" });
   } catch {

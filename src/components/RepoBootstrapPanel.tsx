@@ -1,5 +1,6 @@
 "use client";
 
+import Link from "next/link";
 import { useEffect, useMemo, useState, type ReactNode } from "react";
 import {
   ACTIVE_REPO_MODEL_OPTIONS,
@@ -162,7 +163,12 @@ export function RepoBootstrapPanel() {
               ) : null}
             </div>
             <h2 className="text-base font-semibold text-white">Репозитории</h2>
-            <p className="mt-1 text-sm leading-6 text-[#95a3b6]">Выбери, что прошивать в новые сессии.</p>
+            <Link
+              href="/setup/github-app"
+              className="mt-1 inline-flex text-sm font-semibold text-emerald-200 transition hover:text-emerald-100"
+            >
+              Настроить GitHub App
+            </Link>
           </div>
           <StatusChip state={status} />
         </div>
@@ -209,7 +215,7 @@ export function RepoBootstrapPanel() {
 
         {status.kind === "ready" && !status.configured ? (
           <Notice tone="error" title="Нужно закончить локальную настройку">
-            GitHub App ещё не готов локально. Не хватает: {status.missing.join(", ")}.
+            GitHub App ещё не готов локально. Не хватает: {status.missing.join(", ")}. Открой setup и внеси env.
           </Notice>
         ) : null}
 

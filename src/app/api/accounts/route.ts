@@ -27,7 +27,6 @@ export async function GET() {
         updatedAt: account.updatedAt,
         hasCreds: account.creds !== null,
         orgId: account.creds?.orgId || null,
-        bearerPreview: account.creds?.bearer ? `${account.creds.bearer.slice(0, 16)}…` : null,
         assignedRepoFullName: repoAssignment?.fullName || null,
         assignedBranch: repoAssignment?.branch || null,
         preparedRepos,

@@ -4,6 +4,7 @@ import assert from "node:assert/strict";
 const {
   buildQuotaInterventionPrompt,
   classifyQuotaBand,
+  resolveSupervisorPaths,
   selectActionableSession,
   summarizeQuotaUsage,
 } = await import("../src/lib/supervisorWatcher.ts");
@@ -17,6 +18,29 @@ test("classifyQuotaBand follows the 20/10/5/2 thresholds", () => {
   assert.equal(classifyQuotaBand(2), "stop");
   assert.equal(classifyQuotaBand(0), "exhausted");
 });
+
+test("resolveSupervisorPaths defaults to DEVIN_DASHBOARD_HOME when set", () => {
+  const previousHome = process.env.DEVIN_DASHBOARD_HOME;
+  const previousSupervisorHome = process.env.DEVIN_SUPERVISOR_HOME;
+  delete process.env.DEVIN_SUPERVISOR_HOME;
+  process.env.DEVIN_DASHBOARD_HOME = "/tmp/devin-dashboard-home-for-test";
+
+  try {
+    const paths = resolveSupervisorPaths();
+    assert.equal(paths.rootDir, "/tmp/devin-dashboard-home-for-test");
+  } finally {
+    restoreEnv("DEVIN_DASHBOARD_HOME", previousHome);
+    restoreEnv("DEVIN_SUPERVISOR_HOME", previousSupervisorHome);
+  }
+});
+
+function restoreEnv(key: string, value: string | undefined): void {
+  if (value === undefined) {
+    delete process.env[key];
+  } else {
+    process.env[key] = value;
+  }
+}
 
 test("summarizeQuotaUsage converts used percentages into remaining headroom", () => {
   const summary = summarizeQuotaUsage({

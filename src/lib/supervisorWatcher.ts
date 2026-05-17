@@ -1,5 +1,4 @@
 import { appendFile, mkdir, readFile, writeFile } from "node:fs/promises";
-import { homedir } from "node:os";
 import path from "node:path";
 import {
   listStoredAccounts,
@@ -23,6 +22,7 @@ import {
   type ScoreAccountInput,
   type ScoredAccount,
 } from "@/lib/accountScorer";
+import { getDashboardHome } from "@/lib/dashboardStore";
 
 type JsonRecord = Record<string, unknown>;
 
@@ -134,7 +134,7 @@ export type RunSupervisorLoopOptions = RunSupervisorTickOptions & {
 export function resolveSupervisorPaths(overrides: Partial<SupervisorPaths> = {}): SupervisorPaths {
   const rootDir = overrides.rootDir
     || process.env.DEVIN_SUPERVISOR_HOME
-    || path.join(homedir(), ".devin-dashboard");
+    || getDashboardHome();
   return {
     rootDir,
     statePath: overrides.statePath || process.env.DEVIN_SUPERVISOR_STATE_PATH || path.join(rootDir, "supervisor-state.json"),

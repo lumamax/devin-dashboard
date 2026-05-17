@@ -2,8 +2,8 @@
  * POST /api/accounts/extract-cookie
  *
  * Auto-extract `wos-session` from the user's logged-in Chrome profile.
- * The cookie value is returned to the dashboard UI so the user can paste
- * it into an OmniRoute connection (or upcoming auto-save flow).
+ * The cookie value is returned to the dashboard UI for local account capture
+ * and manual troubleshooting.
  *
  * Security:
  *   - This endpoint **must only run on localhost**. Reading the user's

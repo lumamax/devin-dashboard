@@ -11,7 +11,7 @@ import {
   type ActiveRepoModel,
   type ActiveRepoSelection,
 } from "@/lib/activeRepo";
-import type { AccountSummary, PreparedRepoSummary } from "@/lib/omniroute";
+import type { AccountSummary, PreparedRepoSummary } from "@/lib/accountSummary";
 
 type Status = "idle" | "launching" | "connecting" | "success" | "warning" | "error";
 

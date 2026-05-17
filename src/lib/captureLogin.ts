@@ -18,7 +18,7 @@
  *   3. The captured triple (bearer, orgId, cookie) is held in-memory under
  *      a ticket id; the dashboard polls a status endpoint until it's there
  *      and then asks the user for a friendly name, finally saving the
- *      credentials into OmniRoute via /api/providers.
+ *      credentials into the local dashboard store.
  *
  * The Chrome window stays open after capture — the user can continue to
  * use it. We just stop listening.

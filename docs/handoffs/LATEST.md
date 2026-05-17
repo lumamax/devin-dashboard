@@ -1,62 +1,72 @@
 # Latest Handoff
 
 ## Task
-Continue `lumamax/devin-dashboard` as the active Devin control-plane repo for multi-account cloud work.
+
+Continue `lumamax/devin-dashboard` as the standalone Devin control-plane repo for multi-account cloud work.
 
 Current focus:
-- backend-first repo attach
-- one shared private git contour across multiple Devin accounts
-- dense desktop dashboard UI
-- short factual handoff between local Codex and cloud Devin agents
+
+- remove runtime OmniRoute dependency
+- make storage cross-platform and local-first
+- keep GitHub App as the long-term repo access broker
+- prepare the repo for public/user setup without leaking private data
 
 ## Completed
-- Added quota-aware account ordering and supporting helpers.
-- Added persisted prepared-repo state per account.
-- Added multi-repo selection through GitHub App discovery instead of manual owner/repo input.
-- Added global model selection for new attach sessions and threaded that model into repo bootstrap.
-- Simplified the main UI for large monitors:
-  - compact hero
-  - tighter left rail
-  - larger primary actions
-  - cleaner account cards
-  - hidden end-user session internals
-  - repo chips and model chips moved into calmer, smaller zones
-- Kept quota semantics correct: bars now represent remaining headroom, not used percentage.
 
-## Verified
-- `npm test` passes
-- `npm run typecheck` passes
-- `npm run build` passes
-- Wide-screen screenshot after the latest polish: `/private/tmp/devin-dashboard-shots/final-pass-3.png`
+- Added local dashboard store under `src/lib/dashboardStore.ts`.
+- Made `connectionStore` default to `DEVIN_DASHBOARD_STORE=local`.
+- Kept OmniRoute only as explicit legacy mode for migration.
+- Added `scripts/migrate-from-omniroute.ts` and `npm run migrate:omniroute`.
+- Removed bearer previews from account API/page payloads.
+- Added neutral `accountSummary` types and moved visible status copy to `Local Control Plane`.
+- Added `/setup/github-app` for user-facing GitHub App setup.
+- Added `docs/pat-bootstrap.md` for a safe fine-grained PAT fallback flow.
+- Updated `.env.example`, `.gitignore`, `README.md`, `HANDOFF.md`, and `AGENTS.md` for the independent contour.
+
+## Verification
+
+Run before continuing:
+
+```bash
+npm test
+npm run typecheck
+npm run build
+```
 
 ## Current Operator Rules
-- One Devin account should avoid duplicate attach for the same repo.
-- Prepared repos are the visible truth inside each account card.
-- Session internals stay in backend logic; the dashboard UI should stay user-facing and compact.
-- Global repo/model choices live in the left rail and drive attach behavior.
-- Durable continuity remains private GitHub + branch state + factual handoff.
+
+- Durable continuity is GitHub plus handoff, not Devin VM state.
+- A prepared repo should not be attached repeatedly to the same account.
+- Initial repo attach should clone and then wait unless a task is explicitly included.
+- GitHub App private keys stay local and are never sent to Devin.
+- Quota bars represent remaining headroom, not used percentage.
 
 ## Important Context For The Next Agent
+
 Read these first:
+
 1. `README.md`
 2. `AGENTS.md`
 3. `HANDOFF.md`
-4. `docs/handoffs/LATEST.md`
+4. `docs/independent-control-plane-plan.md`
 5. `docs/cloud-agent-operating-model.md`
 6. `docs/supervisor-cloud-sync-contract.md`
 7. `docs/github-app-control-plane-plan.md`
+8. `docs/pat-bootstrap.md`
 
 Check these implementation files next:
-- `src/components/AccountCard.tsx`
+
+- `src/lib/dashboardStore.ts`
+- `src/lib/connectionStore.ts`
+- `src/app/setup/github-app/page.tsx`
 - `src/components/RepoBootstrapPanel.tsx`
-- `src/components/AddAccountWizard.tsx`
+- `src/components/AccountCard.tsx`
 - `src/app/api/accounts/[id]/connect-repo/route.ts`
-- `src/lib/activeRepo.ts`
-- `src/lib/dashboardRepoState.ts`
-- `src/lib/sessionPolicy.ts`
+- `scripts/migrate-from-omniroute.ts`
 
 ## Next Best Actions
-1. Harden pure backend attach for zero-session / brand-new accounts.
-2. Discover whether Devin exposes a clean backend message endpoint for continuing an existing live session without UI automation.
-3. If UI polish continues, keep testing on wide desktop layouts before committing.
-4. If a cloud Devin agent takes over, keep the handoff short: shipped result, git state, next concrete action.
+
+1. Run verification and fix any regressions.
+2. Finish splitting or deleting old session-inspector code from `AccountCard.tsx`.
+3. Add encrypted export/import for moving local dashboard vaults between machines.
+4. Discover the clean backend endpoint for sending follow-up instructions into an existing Devin session.

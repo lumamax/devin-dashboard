@@ -1,15 +1,20 @@
 /**
- * Read/write Devin connections in OmniRoute.
+ * Read/write Devin connections.
  *
- * The dashboard is local-only, so we prefer OmniRoute's HTTP API when it
- * cooperates and fall back to direct SQLite writes when the running build
- * does not accept `devin-web` through `/api/providers` yet.
+ * The dashboard is local-first: by default it stores accounts in its own
+ * cross-platform local vault under DEVIN_DASHBOARD_HOME. OmniRoute support is
+ * kept as an explicit legacy mode for migration and old private workflows.
  */
 
 import { execFileSync } from "node:child_process";
 import { randomUUID } from "node:crypto";
 import { homedir } from "node:os";
 import path from "node:path";
+import {
+  listLocalStoredAccounts,
+  saveLocalAccount,
+  updateLocalAccountCreds,
+} from "@/lib/dashboardStore";
 import { DevinCreds } from "./devinApi";
 
 export type DevinLaunchContext = {
@@ -36,7 +41,7 @@ export type StoredDevinAccount = {
   launchContext: DevinLaunchContext | null;
 };
 
-type SaveAccountInput = {
+export type SaveAccountInput = {
   name: string;
   creds: DevinCreds;
   priority?: number;
@@ -62,6 +67,11 @@ function getEnv() {
   };
 }
 
+function getStoreMode(): "local" | "omniroute" {
+  const raw = (process.env.DEVIN_DASHBOARD_STORE || "local").trim().toLowerCase();
+  return raw === "omniroute" ? "omniroute" : "local";
+}
+
 function requireAuthedEnv() {
   const env = getEnv();
   if (!env.token.trim()) {
@@ -80,6 +90,10 @@ function getDbPath(): string {
 }
 
 export async function listStoredAccounts(): Promise<StoredDevinAccount[]> {
+  if (getStoreMode() === "local") {
+    return listLocalStoredAccounts();
+  }
+
   try {
     const apiAccounts = await listStoredAccountsViaApi();
     if (apiAccounts.length > 0) {
@@ -116,6 +130,10 @@ export async function getStoredAccount(
 export async function saveAccount(
   input: SaveAccountInput,
 ): Promise<{ id: string }> {
+  if (getStoreMode() === "local") {
+    return saveLocalAccount(input);
+  }
+
   try {
     return await saveAccountViaApi(input);
   } catch (error) {
@@ -130,6 +148,11 @@ export async function updateAccountCreds(
   creds: DevinCreds,
   providerSpecificData?: Record<string, unknown> | null,
 ): Promise<void> {
+  if (getStoreMode() === "local") {
+    updateLocalAccountCreds(id, creds, providerSpecificData);
+    return;
+  }
+
   try {
     const saved = await updateAccountViaApi(id, creds, providerSpecificData);
     if (saved) return;

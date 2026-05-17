@@ -61,3 +61,29 @@ test("launchChrome creates a per-connection profile and detaches the child", () 
     rmSync(profileRoot, { recursive: true, force: true });
   }
 });
+
+test("resolveProfileDir defaults to DEVIN_DASHBOARD_HOME when set", () => {
+  const previousHome = process.env.DEVIN_DASHBOARD_HOME;
+  const previousProfileRoot = process.env.DEVIN_PROFILE_ROOT;
+  const dashboardHome = mkdtempSync(path.join(tmpdir(), "devin-dashboard-home-"));
+  delete process.env.DEVIN_PROFILE_ROOT;
+  process.env.DEVIN_DASHBOARD_HOME = dashboardHome;
+
+  try {
+    const dir = resolveProfileDir("conn-home");
+    assert.equal(dir, path.join(dashboardHome, "profiles", "conn-home"));
+    assert.ok(existsSync(dir));
+  } finally {
+    restoreEnv("DEVIN_DASHBOARD_HOME", previousHome);
+    restoreEnv("DEVIN_PROFILE_ROOT", previousProfileRoot);
+    rmSync(dashboardHome, { recursive: true, force: true });
+  }
+});
+
+function restoreEnv(key: string, value: string | undefined): void {
+  if (value === undefined) {
+    delete process.env[key];
+  } else {
+    process.env[key] = value;
+  }
+}

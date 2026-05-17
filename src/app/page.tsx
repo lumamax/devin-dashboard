@@ -1,11 +1,11 @@
 import { AccountCard } from "@/components/AccountCard";
 import { AddAccountWizard } from "@/components/AddAccountWizard";
-import { OmniRouteStatus } from "@/components/OmniRouteStatus";
+import { ControlPlaneStatus } from "@/components/ControlPlaneStatus";
 import { RepoBootstrapPanel } from "@/components/RepoBootstrapPanel";
+import type { AccountSummary } from "@/lib/accountSummary";
 import { orderStoredAccountsByHealth } from "@/lib/accountOrdering";
 import { listStoredAccounts } from "@/lib/connectionStore";
 import { readPreparedRepos, readRepoAssignment } from "@/lib/dashboardRepoState";
-import type { AccountSummary } from "@/lib/omniroute";
 
 export const dynamic = "force-dynamic";
 
@@ -36,7 +36,6 @@ export default async function Home() {
         updatedAt: account.updatedAt,
         hasCreds: account.creds !== null,
         orgId: account.creds?.orgId || null,
-        bearerPreview: account.creds?.bearer ? `${account.creds.bearer.slice(0, 16)}…` : null,
         assignedRepoFullName: repoAssignment?.fullName || null,
         assignedBranch: repoAssignment?.branch || null,
         preparedRepos,
@@ -66,7 +65,7 @@ export default async function Home() {
                 Devin Dashboard
               </span>
               <span className="rounded-full border border-emerald-400/20 bg-emerald-400/10 px-3 py-1 text-emerald-200">
-                Local OmniRoute
+                Local Control Plane
               </span>
             </div>
 
@@ -88,7 +87,7 @@ export default async function Home() {
         </div>
       </section>
 
-      <OmniRouteStatus error={error} />
+      <ControlPlaneStatus error={error} />
 
       <section className="grid gap-4 xl:grid-cols-[296px_minmax(0,1fr)] xl:items-start">
         <aside className="xl:sticky xl:top-4">

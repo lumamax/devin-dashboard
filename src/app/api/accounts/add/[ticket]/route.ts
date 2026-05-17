@@ -1,9 +1,9 @@
 /**
  * GET  /api/accounts/add/[ticket] — poll capture status.
- *      Returns 'pending' | 'captured' (with masked creds) | 'expired' | 'error'.
+ *      Returns 'pending' | 'captured' | 'expired' | 'error'.
  *
- * POST /api/accounts/add/[ticket] — save the captured credentials to
- *      OmniRoute as a `devin-web` provider connection. Body: { name, priority? }.
+ * POST /api/accounts/add/[ticket] — save captured credentials to the local
+ *      dashboard store. Body: { name, priority? }.
  */
 
 import { NextResponse } from "next/server";
@@ -22,14 +22,10 @@ export async function GET(
   const { ticket } = await params;
   const status = getCaptureStatus(ticket);
   if (status.status === "captured") {
-    // Don't leak the full bearer to the UI before save — surface only
-    // metadata + a tiny preview.
     return NextResponse.json({
       ok: true,
       status: "captured",
-      orgId: status.orgId,
       suggestedName: status.suggestedName,
-      bearerPreview: status.bearer.slice(0, 16) + "…",
       hasCookie: Boolean(status.cookie),
       capturedAt: status.capturedAt,
     });

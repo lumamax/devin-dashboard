@@ -2,7 +2,7 @@
  * Per-account Chrome launcher.
  *
  * Each Devin account gets its own persistent --user-data-dir under
- * DEVIN_PROFILE_ROOT (default ~/.devin-dashboard/profiles/<id>). Once the
+ * DEVIN_PROFILE_ROOT (default dashboard-home/profiles/<id>). Once the
  * user signs into app.devin.ai inside that window, the session cookie
  * survives subsequent re-opens. We never inject a cookie blindly — see
  * `extractCookies.ts` for the (carefully-scoped) auto-extract flow.
@@ -13,8 +13,8 @@
 
 import { spawn } from "node:child_process";
 import { existsSync, mkdirSync } from "node:fs";
-import { homedir } from "node:os";
 import path from "node:path";
+import { getDashboardHome } from "@/lib/dashboardStore";
 
 export const DEVIN_WEB_URL = "https://app.devin.ai/";
 
@@ -22,7 +22,7 @@ export type LaunchOptions = {
   connectionId: string;
   /** Override the Chrome binary. Auto-detected per-OS by default. */
   binaryPath?: string;
-  /** Override the profile root. Defaults to DEVIN_PROFILE_ROOT or ~/.devin-dashboard/profiles. */
+  /** Override the profile root. Defaults to DEVIN_PROFILE_ROOT or dashboard-home/profiles. */
   profileRoot?: string;
   /** Override the full Chrome user-data-dir. */
   userDataDir?: string;
@@ -112,7 +112,7 @@ export function resolveProfileDir(connectionId: string, root?: string): string {
   const resolvedRoot =
     root ||
     process.env.DEVIN_PROFILE_ROOT ||
-    path.join(homedir(), ".devin-dashboard", "profiles");
+    path.join(getDashboardHome(), "profiles");
   const dir = path.join(resolvedRoot, connectionId);
   if (!existsSync(dir)) {
     mkdirSync(dir, { recursive: true });

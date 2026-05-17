@@ -29,7 +29,7 @@ Effective headroom is always:
 
 ## What it writes
 
-By default the watcher keeps its own tiny local state under `~/.devin-dashboard/`:
+By default the watcher keeps its own tiny local state under the dashboard home (`~/.devin-dashboard` on macOS/Linux, `%APPDATA%\\devin-dashboard` on Windows):
 
 - `supervisor-state.json` — last known zone and action memory per account
 - `supervisor-latest.json` — latest full snapshot for operator inspection
