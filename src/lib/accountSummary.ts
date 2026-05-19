@@ -19,6 +19,12 @@ export type AccountSummary = {
   assignedRepoFullName?: string | null;
   assignedBranch?: string | null;
   preparedRepos?: PreparedRepoSummary[];
+  browserProfileState?: "ready" | "recoverable" | "relink-required" | "unknown";
+  browserProfileCode?: string | null;
+  browserProfileMessage?: string | null;
+  browserProfilePathExists?: boolean | null;
+  hasStoredBrowserCookie?: boolean;
+  hasProfileBrowserCookie?: boolean;
 };
 
 export async function listDevinAccounts(): Promise<AccountSummary[]> {

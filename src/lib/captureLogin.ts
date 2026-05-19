@@ -8,8 +8,8 @@
  *
  * Flow:
  *   1. Dashboard backend spawns Chrome with --remote-debugging-port=<free>
- *      and a fresh, empty --user-data-dir (so the user actually has to log
- *      in), navigated to https://app.devin.ai.
+ *      and a fresh, durable --user-data-dir under dashboard-home/profiles
+ *      (so the user actually has to log in), navigated to https://app.devin.ai.
  *   2. We connect to Chrome via CDP (chrome-remote-interface), enable the
  *      Network domain, and listen for `Network.requestWillBeSentExtraInfo`
  *      events. The first request to app.devin.ai/api/* with both an
@@ -25,12 +25,12 @@
  */
 
 import { spawn, type ChildProcess } from "node:child_process";
-import { existsSync, mkdtempSync, rmSync } from "node:fs";
-import { tmpdir } from "node:os";
+import { existsSync, mkdirSync, rmSync } from "node:fs";
 import path from "node:path";
 import { createServer } from "node:net";
 import { randomBytes } from "node:crypto";
 import CDP from "chrome-remote-interface";
+import { getDashboardHome } from "@/lib/dashboardStore";
 import {
   extractDevinCookieHeader,
   extractDevinProfileAuth,
@@ -79,7 +79,7 @@ export async function startCapture(): Promise<{
 
   const ticket = `cap_${randomBytes(8).toString("hex")}`;
   const chromePort = await findFreePort();
-  const profileDir = mkdtempSync(path.join(tmpdir(), "devin-dashboard-login-"));
+  const profileDir = resolveCaptureProfileDir(ticket);
   const binaryPath = resolveChromeBinary();
   const args = [
     `--user-data-dir=${profileDir}`,
@@ -155,8 +155,8 @@ export function getCaptureStatus(ticket: string): CaptureStatus {
 }
 
 /**
- * Forget the capture ticket. Closes CDP (Chrome stays open for the user)
- * and deletes the temp profile dir. Idempotent.
+ * Forget the capture ticket. Closes CDP; Chrome and its durable profile stay
+ * open for the user. Idempotent.
  */
 export function disposeCapture(ticket: string): void {
   const state = TICKETS.get(ticket);
@@ -173,10 +173,9 @@ function cleanup(state: InternalState): void {
   }
   state.cdpClient = null;
   // We do NOT kill the Chrome child — the user is still using the window.
-  // Temp profile is intentionally NOT deleted either: the user is logged in
-  // there, and the next time they open Devin from this dashboard we want
-  // that session to persist. The dashboard will move/rename this profile
-  // when the connection is saved (see saveCapturedAccount in routes).
+  // The durable capture profile is intentionally NOT deleted either: the user
+  // is logged in there, and the next time they open Devin from this dashboard
+  // we want that browser session to persist.
 }
 
 function pruneExpired(): void {
@@ -187,6 +186,12 @@ function pruneExpired(): void {
       TICKETS.delete(ticket);
     }
   }
+}
+
+function resolveCaptureProfileDir(ticket: string): string {
+  const dir = path.join(getDashboardHome(), "profiles", "captures", ticket);
+  mkdirSync(dir, { recursive: true, mode: 0o700 });
+  return dir;
 }
 
 async function findFreePort(): Promise<number> {
@@ -456,13 +461,9 @@ function sleep(ms: number): Promise<void> {
 }
 
 /**
- * Returns the temp profile dir that was used during capture, so it can be
- * promoted into a permanent per-account profile dir (renamed or symlinked
- * under DEVIN_PROFILE_ROOT/<connectionId>) by the save handler. Returns
- * null when the ticket is gone or never captured.
- *
- * v0.2 leaves the temp dir in place and stores its path inside the
- * connection's providerSpecificData (TODO). For now it's a utility hook.
+ * Returns the durable profile dir that was used during capture. Returns null
+ * when the ticket is gone, never captured, or the profile was removed outside
+ * the dashboard.
  */
 export function getCaptureProfileDir(ticket: string): string | null {
   const state = TICKETS.get(ticket);

@@ -97,7 +97,7 @@ When you click `Add Devin`:
 1. Dashboard launches Chrome with a fresh profile and a local debugging port.
 2. You log into Devin in that window.
 3. Dashboard captures the Devin cookie, bearer token, and org id from local browser traffic.
-4. Dashboard saves the account to the local vault.
+4. Dashboard saves the account to the local vault and keeps the login browser profile under `~/.devin-dashboard/profiles/`.
 5. `Open` reopens the same account profile later.
 
 The Chrome import path scans existing local Chrome profiles for Devin auth. It is convenient, but platform cookie decryption may require OS tools such as Keychain, libsecret, PowerShell, `sqlite3`, or `strings`.

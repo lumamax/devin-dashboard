@@ -1,4 +1,5 @@
 import { rankAccounts, type AccountQuotaInput, type ScoredAccount, type ScoreAccountInput } from "@/lib/accountScorer";
+import { assessBrowserProfile } from "@/lib/browserProfileHealth";
 import type { StoredDevinAccount } from "@/lib/connectionStore";
 import { readRepoAssignment } from "@/lib/dashboardRepoState";
 import { devinGet } from "@/lib/devinApi";
@@ -15,6 +16,7 @@ export async function rankStoredAccounts(
     const quotaResult = quotaResults[index];
     const quota: AccountQuotaInput | null = quotaResult.status === "fulfilled" ? quotaResult.value : null;
     const repoAssignment = readRepoAssignment(account.providerSpecificData);
+    const browserProfile = assessBrowserProfile(account);
 
     return {
       id: account.id,
@@ -22,6 +24,7 @@ export async function rankStoredAccounts(
       quota,
       lifecycle: {
         hasCreds: account.creds !== null,
+        needsBrowserRelink: browserProfile.state === "relink-required",
         testStatus: account.testStatus,
         rateLimitedUntil: account.rateLimitedUntil,
         lastError: account.lastError,

@@ -92,6 +92,32 @@ test("local store updates credentials and preserves account id", async () => {
   });
 });
 
+test("local store can rename during relink and delete accounts", async () => {
+  const mod = await import("../src/lib/connectionStore.ts");
+
+  await withTempLocalStore(async () => {
+    const saved = await mod.saveAccount({
+      name: "Old Devin",
+      creds: { cookie: "old", bearer: "old-bearer", orgId: "org-old" },
+    });
+
+    await mod.updateAccountCreds(
+      saved.id,
+      { cookie: "new", bearer: "new-bearer", orgId: "org-new" },
+      { devinDashboard: { userDataDir: "/tmp/devin-dashboard-profile" } },
+      { name: "New Devin" },
+    );
+
+    const renamed = await mod.getStoredAccount(saved.id);
+    assert.equal(renamed?.name, "New Devin");
+    assert.equal(renamed?.creds?.orgId, "org-new");
+
+    assert.equal(await mod.deleteStoredAccount(saved.id), true);
+    assert.equal(await mod.getStoredAccount(saved.id), null);
+    assert.equal(await mod.deleteStoredAccount(saved.id), false);
+  });
+});
+
 function restoreEnv(key: string, value: string | undefined): void {
   if (value === undefined) {
     delete process.env[key];

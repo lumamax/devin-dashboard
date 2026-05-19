@@ -1,5 +1,6 @@
 import { NextResponse } from "next/server";
 import { orderStoredAccountsByHealth } from "@/lib/accountOrdering";
+import { assessBrowserProfile } from "@/lib/browserProfileHealth";
 import { listStoredAccounts } from "@/lib/connectionStore";
 import { readPreparedRepos, readRepoAssignment } from "@/lib/dashboardRepoState";
 
@@ -9,6 +10,7 @@ export async function GET() {
     const ordered = await orderStoredAccountsByHealth(stored).catch(() => stored);
     const safe = ordered.map((account) => {
       const repoAssignment = readRepoAssignment(account.providerSpecificData);
+      const browserProfile = assessBrowserProfile(account);
       const preparedRepos = readPreparedRepos(account.providerSpecificData).map((repo) => ({
         fullName: repo.repoFullName,
         branch: repo.branch,
@@ -30,6 +32,12 @@ export async function GET() {
         assignedRepoFullName: repoAssignment?.fullName || null,
         assignedBranch: repoAssignment?.branch || null,
         preparedRepos,
+        browserProfileState: browserProfile.state,
+        browserProfileCode: browserProfile.code,
+        browserProfileMessage: browserProfile.message,
+        browserProfilePathExists: browserProfile.pathExists,
+        hasStoredBrowserCookie: browserProfile.hasStoredCookie,
+        hasProfileBrowserCookie: browserProfile.hasProfileCookie,
       };
     });
     return NextResponse.json({ ok: true, accounts: safe });

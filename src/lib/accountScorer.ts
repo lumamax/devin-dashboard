@@ -7,6 +7,10 @@
  *   3. repoReady — whether the account already has the target repo assigned (0-20 points)
  *
  * Higher total = better candidate for the next cloud worker task.
+ *
+ * Each account also carries a quota band. Lifecycle answers whether the
+ * account can take work; quotaBand answers how close it is to checkpoint or
+ * handoff territory.
  */
 
 export type AccountQuotaInput = {
@@ -16,6 +20,7 @@ export type AccountQuotaInput = {
 
 export type AccountLifecycleInput = {
   hasCreds: boolean;
+  needsBrowserRelink?: boolean;
   testStatus: string | null;
   rateLimitedUntil: string | null;
   lastError: string | null;
@@ -34,6 +39,8 @@ export type ScoredAccount = {
   lifecycleScore: number;
   repoScore: number;
   lifecycle: AccountLifecycle;
+  quotaBand: QuotaBand;
+  effectiveHeadroom: number | null;
   dailyPercentage: number | null;
   weeklyPercentage: number | null;
   assignedRepoFullName: string | null;
@@ -48,6 +55,15 @@ export type AccountLifecycle =
   | "errored"
   | "exhausted"
   | "draining";
+
+export type QuotaBand =
+  | "unknown"
+  | "healthy"
+  | "draining"
+  | "checkpoint"
+  | "forced-handoff"
+  | "stop-work"
+  | "exhausted";
 
 export type ScoreAccountInput = {
   id: string;
@@ -70,12 +86,14 @@ export function scoreAccount(
   const disqualified = lifecycle === "needs-relink"
     || lifecycle === "rate-limited"
     || lifecycle === "exhausted";
-  const disqualifyReason = disqualified ? lifecycleDisqualifyReason(lifecycle) : null;
+  const disqualifyReason = disqualified ? lifecycleDisqualifyReason(lifecycle, input.lifecycle) : null;
 
   const quotaScore = disqualified ? 0 : computeQuotaScore(input.quota);
   const lifecycleScore = computeLifecycleScore(lifecycle);
   const repoScore = computeRepoScore(input.repo, options.targetRepo);
   const score = disqualified ? 0 : quotaScore + lifecycleScore + repoScore;
+  const headroom = effectiveHeadroom(input.quota);
+  const quotaBand = computeQuotaBand(headroom);
 
   return {
     accountId: input.id,
@@ -85,6 +103,8 @@ export function scoreAccount(
     lifecycleScore,
     repoScore,
     lifecycle,
+    quotaBand,
+    effectiveHeadroom: headroom,
     dailyPercentage: input.quota?.dailyPercentage ?? null,
     weeklyPercentage: input.quota?.weeklyPercentage ?? null,
     assignedRepoFullName: input.repo.assignedRepoFullName,
@@ -111,6 +131,7 @@ export function resolveLifecycle(
   now?: number,
 ): AccountLifecycle {
   if (!lc.hasCreds) return "needs-relink";
+  if (lc.needsBrowserRelink) return "needs-relink";
 
   if (lc.rateLimitedUntil) {
     const until = new Date(lc.rateLimitedUntil).getTime();
@@ -132,6 +153,26 @@ export function resolveLifecycle(
   if (lc.testStatus === "valid" || lc.testStatus === "ok") return "active";
 
   return "active";
+}
+
+export function effectiveHeadroom(quota: AccountQuotaInput | null): number | null {
+  if (!quota) return null;
+  const daily = quota.dailyPercentage;
+  const weekly = quota.weeklyPercentage;
+  if (daily === null && weekly === null) return null;
+  if (daily === null) return weekly;
+  if (weekly === null) return daily;
+  return Math.min(daily, weekly);
+}
+
+export function computeQuotaBand(headroomPercent: number | null): QuotaBand {
+  if (headroomPercent === null) return "unknown";
+  if (headroomPercent <= 0) return "exhausted";
+  if (headroomPercent <= 2) return "stop-work";
+  if (headroomPercent <= 5) return "forced-handoff";
+  if (headroomPercent <= 10) return "checkpoint";
+  if (headroomPercent <= 20) return "draining";
+  return "healthy";
 }
 
 function computeQuotaScore(quota: AccountQuotaInput | null): number {
@@ -164,9 +205,9 @@ function computeRepoScore(
   return 0;
 }
 
-function lifecycleDisqualifyReason(lifecycle: AccountLifecycle): string {
+function lifecycleDisqualifyReason(lifecycle: AccountLifecycle, input: AccountLifecycleInput): string {
   switch (lifecycle) {
-    case "needs-relink": return "Account credentials missing or expired";
+    case "needs-relink": return input.needsBrowserRelink ? "Browser session lost; relink login" : "Account credentials missing or expired";
     case "rate-limited": return "Account is rate-limited";
     case "exhausted": return "Quota fully exhausted";
     default: return "Unknown";

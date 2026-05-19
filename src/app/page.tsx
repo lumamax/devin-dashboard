@@ -1,9 +1,11 @@
 import { AccountCard } from "@/components/AccountCard";
 import { AddAccountWizard } from "@/components/AddAccountWizard";
 import { ControlPlaneStatus } from "@/components/ControlPlaneStatus";
+import { PickBestAccountPanel } from "@/components/PickBestAccountPanel";
 import { RepoBootstrapPanel } from "@/components/RepoBootstrapPanel";
 import type { AccountSummary } from "@/lib/accountSummary";
 import { orderStoredAccountsByHealth } from "@/lib/accountOrdering";
+import { assessBrowserProfile } from "@/lib/browserProfileHealth";
 import { listStoredAccounts } from "@/lib/connectionStore";
 import { readPreparedRepos, readRepoAssignment } from "@/lib/dashboardRepoState";
 
@@ -18,6 +20,7 @@ export default async function Home() {
     const ordered = await orderStoredAccountsByHealth(stored).catch(() => stored);
     accounts = ordered.map((account) => {
       const repoAssignment = readRepoAssignment(account.providerSpecificData);
+      const browserProfile = assessBrowserProfile(account);
       const preparedRepos = readPreparedRepos(account.providerSpecificData).map((repo) => ({
         fullName: repo.repoFullName,
         branch: repo.branch,
@@ -39,16 +42,23 @@ export default async function Home() {
         assignedRepoFullName: repoAssignment?.fullName || null,
         assignedBranch: repoAssignment?.branch || null,
         preparedRepos,
+        browserProfileState: browserProfile.state,
+        browserProfileCode: browserProfile.code,
+        browserProfileMessage: browserProfile.message,
+        browserProfilePathExists: browserProfile.pathExists,
+        hasStoredBrowserCookie: browserProfile.hasStoredCookie,
+        hasProfileBrowserCookie: browserProfile.hasProfileCookie,
       };
     });
   } catch (err: unknown) {
     error = err instanceof Error ? err.message : "Unknown error";
   }
 
+  const isRelinkRequired = (account: AccountSummary) => !account.hasCreds || account.browserProfileState === "relink-required";
   const readyCount = accounts.filter(
-    (account) => account.hasCreds && (account.testStatus === "valid" || account.testStatus === "ok"),
+    (account) => !isRelinkRequired(account) && (account.testStatus === "valid" || account.testStatus === "ok"),
   ).length;
-  const relinkCount = accounts.filter((account) => !account.hasCreds).length;
+  const relinkCount = accounts.filter(isRelinkRequired).length;
   const cooldownCount = accounts.filter((account) => {
     if (!account.rateLimitedUntil) return false;
     const until = new Date(account.rateLimitedUntil).getTime();
@@ -94,6 +104,7 @@ export default async function Home() {
           <div className="space-y-4">
             <AddAccountWizard />
             <RepoBootstrapPanel />
+            <PickBestAccountPanel />
           </div>
         </aside>
 

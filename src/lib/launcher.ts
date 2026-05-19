@@ -150,7 +150,10 @@ function resolveUserDataDir(options: LaunchOptions): string {
   const explicit = options.userDataDir?.trim();
   if (explicit) {
     if (!existsSync(explicit)) {
-      mkdirSync(explicit, { recursive: true });
+      throw new LauncherError(
+        "profile_not_found",
+        `Saved Chrome profile no longer exists: ${explicit}. Relink this Devin account to create a new durable login profile.`,
+      );
     }
     return explicit;
   }
