@@ -29,6 +29,38 @@ type QuotaResponse = {
   models?: unknown;
 };
 
+type LaunchResponse = {
+  ok: boolean;
+  error?: string;
+  code?: string;
+  pid?: number;
+  recoveredMissingProfile?: boolean;
+  cookieRecovery?: { ok: boolean; count: number; error: string | null } | null;
+};
+
+type StartCaptureResponse = {
+  ok: boolean;
+  error?: string;
+  ticket?: string;
+};
+
+type CapturePollResponse = {
+  ok: boolean;
+  status: "pending" | "captured" | "expired" | "error";
+  error?: string;
+};
+
+type RelinkResponse = {
+  ok: boolean;
+  error?: string;
+  name?: string;
+};
+
+type DeleteAccountResponse = {
+  ok: boolean;
+  error?: string;
+};
+
 type ConnectRepoResponse = {
   ok: boolean;
   error?: string;
@@ -197,6 +229,8 @@ export function AccountCard({ account }: { account: AccountSummary }) {
   const [selectedSessionId, setSelectedSessionId] = useState<string | null>(null);
   const [sessionFocus, setSessionFocus] = useState<Record<string, SessionFocusState>>({});
   const [bootstrapAssist, setBootstrapAssist] = useState<BootstrapAssistState>({ kind: "idle" });
+  const [isRelinking, setIsRelinking] = useState(false);
+  const [isDeleting, setIsDeleting] = useState(false);
 
   useEffect(() => {
     setAssignedRepoFullName(account.assignedRepoFullName || null);
@@ -298,12 +332,17 @@ export function AccountCard({ account }: { account: AccountSummary }) {
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify(options?.url ? { url: options.url } : {}),
       });
-      const json = await res.json();
+      const json = (await res.json()) as LaunchResponse;
       if (!res.ok || !json.ok) {
-        throw new Error(json.error || `HTTP ${res.status}`);
+        throw new Error(formatLaunchError(json, res.status));
       }
       setStatus("success");
-      setStatusMessage(options?.successMessage || `Chrome открыт (pid ${json.pid})`);
+      const recoveryNote = json.cookieRecovery?.ok
+        ? " Cookie-сессия восстановлена в новый профиль."
+        : json.recoveredMissingProfile
+          ? " Профиль восстановлен, но cookie не подтянулась."
+          : "";
+      setStatusMessage((options?.successMessage || `Chrome открыт (pid ${json.pid})`) + recoveryNote);
     } catch (err: unknown) {
       setStatus("error");
       setStatusMessage(err instanceof Error ? err.message : "Unknown error");
@@ -311,6 +350,12 @@ export function AccountCard({ account }: { account: AccountSummary }) {
   }
 
   async function handleStart() {
+    if (needsRelink) {
+      setStatus("error");
+      setStatusMessage("Эта browser-сессия уже потеряна: старый профиль удален, а сохраненной cookie нет. Нажми «Перелинк вход» и войди в Devin один раз заново.");
+      return;
+    }
+
     const preferredPrepared = findPreferredPreparedSession(preparedRepos, selectedRepos);
     const preferredUrl = bootstrapAssist.kind === "ready" && bootstrapAssist.sessionId
       ? buildSessionWebUrl(bootstrapAssist.sessionId)
@@ -328,6 +373,12 @@ export function AccountCard({ account }: { account: AccountSummary }) {
   }
 
   async function handleOpenSession(session: SessionSummary) {
+    if (needsRelink) {
+      setStatus("error");
+      setStatusMessage("Сначала перелинкуй browser-вход для этого аккаунта, иначе Devin откроется разлогиненным.");
+      return;
+    }
+
     setStatus("launching");
     setStatusMessage(null);
     try {
@@ -336,15 +387,74 @@ export function AccountCard({ account }: { account: AccountSummary }) {
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({ url: buildSessionWebUrl(session.devinId) }),
       });
-      const json = await res.json();
+      const json = (await res.json()) as LaunchResponse;
       if (!res.ok || !json.ok) {
-        throw new Error(json.error || `HTTP ${res.status}`);
+        throw new Error(formatLaunchError(json, res.status));
       }
       setStatus("success");
       setStatusMessage(`Открыл сессию ${session.title || shrinkId(session.devinId, 6)} в Chrome.`);
     } catch (err: unknown) {
       setStatus("error");
       setStatusMessage(err instanceof Error ? err.message : "Unknown error");
+    }
+  }
+
+  async function handleRelink() {
+    if (isRelinking || isDeleting) return;
+    setIsRelinking(true);
+    setStatus("connecting");
+    setStatusMessage("Открываю отдельное окно Chrome для повторного входа в Devin…");
+    try {
+      const startRes = await fetch("/api/accounts/add", { method: "POST" });
+      const startJson = (await startRes.json()) as StartCaptureResponse;
+      if (!startRes.ok || !startJson.ok || !startJson.ticket) {
+        throw new Error(startJson.error || `HTTP ${startRes.status}`);
+      }
+
+      setStatusMessage("Войди в Devin в открытом окне. Я сам сохраню новый долговечный профиль, когда вход завершится.");
+      await waitForCapturedLogin(startJson.ticket);
+
+      const relinkRes = await fetch(`/api/accounts/${account.id}/relink/${encodeURIComponent(startJson.ticket)}`, {
+        method: "POST",
+      });
+      const relinkJson = (await relinkRes.json()) as RelinkResponse;
+      if (!relinkRes.ok || !relinkJson.ok) {
+        throw new Error(relinkJson.error || `HTTP ${relinkRes.status}`);
+      }
+
+      setStatus("success");
+      setStatusMessage(`Готово: browser-вход сохранен${relinkJson.name ? ` как ${relinkJson.name}` : ""}. Обновляю карточку…`);
+      window.setTimeout(() => window.location.reload(), 700);
+    } catch (err: unknown) {
+      setStatus("error");
+      setStatusMessage(err instanceof Error ? err.message : "Unknown error");
+      setIsRelinking(false);
+    }
+  }
+
+  async function handleDeleteAccount() {
+    if (isDeleting || isRelinking) return;
+    const confirmed = window.confirm(
+      `Удалить сохраненную Devin-сессию «${displayName}» из dashboard? Если профиль принадлежит dashboard, локальный Chrome-профиль тоже будет удален.`,
+    );
+    if (!confirmed) return;
+
+    setIsDeleting(true);
+    setStatus("warning");
+    setStatusMessage("Удаляю сохраненную Devin-сессию…");
+    try {
+      const res = await fetch(`/api/accounts/${account.id}`, { method: "DELETE" });
+      const json = (await res.json()) as DeleteAccountResponse;
+      if (!res.ok || !json.ok) {
+        throw new Error(json.error || `HTTP ${res.status}`);
+      }
+      setStatus("success");
+      setStatusMessage("Сессия удалена из dashboard. Обновляю список…");
+      window.setTimeout(() => window.location.reload(), 500);
+    } catch (err: unknown) {
+      setStatus("error");
+      setStatusMessage(err instanceof Error ? err.message : "Unknown error");
+      setIsDeleting(false);
     }
   }
 
@@ -523,23 +633,30 @@ export function AccountCard({ account }: { account: AccountSummary }) {
   }
 
   const displayName = account.name?.trim() || account.id || "Unnamed Devin account";
+  const browserProfileState = account.browserProfileState || "unknown";
+  const needsBrowserRelink = browserProfileState === "relink-required";
+  const needsRelink = needsBrowserRelink || !account.hasCreds;
+  const browserProfileHelper = describeBrowserProfile(account);
   const helperText = account.lastError
     ? account.lastError
     : !account.hasCreds
       ? "Нужно заново перелинковать аккаунт."
-      : null;
+      : browserProfileHelper;
   const quotaSummary =
     quota.kind === "ready" ? buildQuotaSummary(quota.usage, quota.status, quota.models) : null;
   const pendingRepos = getPendingRepos(selectedRepos, preparedRepos);
   const nextPendingRepo = pendingRepos[0] || null;
   const canSeedRepo = account.hasCreds && pendingRepos.length > 0;
-  const isConnectButtonActive = canSeedRepo && status !== "launching" && status !== "connecting";
+  const actionsLocked = status === "launching" || status === "connecting" || isRelinking || isDeleting;
+  const isConnectButtonActive = canSeedRepo && !actionsLocked;
   const preparedRepoLabels = preparedRepos.map((repo) => repo.fullName).filter(Boolean);
   const planLabel = quotaSummary?.planName ? humanize(quotaSummary.planName) : null;
   const actionHint = bootstrapAssist.kind === "ready"
     ? bootstrapAssist.sessionId
       ? `${bootstrapAssist.repoLabel} · ${shrinkId(bootstrapAssist.sessionId, 6)}`
       : `${bootstrapAssist.repoLabel} готов`
+    : needsRelink
+      ? "Сессия потеряна. Перелинкуй вход."
     : nextPendingRepo
       ? `${formatActiveRepoLabel(nextPendingRepo)} · ${selectedModel.label}`
       : selectedRepos.length > 0
@@ -551,18 +668,37 @@ export function AccountCard({ account }: { account: AccountSummary }) {
       <div className="grid gap-3 xl:grid-cols-[minmax(0,1fr)_248px] xl:items-start">
         <div className="min-w-0 space-y-3">
           <div className="flex flex-wrap items-start justify-between gap-3">
-            <div className="min-w-0">
+            <div className="min-w-0 flex-1">
               <div className="flex flex-wrap items-center gap-2">
                 <h3 className="truncate text-[15px] font-semibold text-white sm:text-base">{displayName}</h3>
-                <StatusBadge testStatus={account.testStatus} rateLimitedUntil={account.rateLimitedUntil} />
-                {!account.hasCreds ? <InlineBadge tone="warn">перелинк</InlineBadge> : null}
-                {account.lastError ? <InlineBadge tone="danger">ошибка</InlineBadge> : null}
+                <AccountStatusBadge account={account} needsRelink={needsRelink} />
               </div>
 
               <div className="mt-2 flex flex-wrap gap-1.5 text-[11px] text-[#9fb0c5]">
                 {account.updatedAt ? <MetaPill label="updated" value={formatDate(account.updatedAt)} /> : null}
                 {planLabel ? <MetaPill label="plan" value={planLabel} /> : null}
               </div>
+            </div>
+            <div className="flex shrink-0 flex-wrap justify-end gap-1.5">
+              {needsRelink ? (
+                <TinyActionButton
+                  tone="warn"
+                  disabled={actionsLocked}
+                  onClick={handleRelink}
+                >
+                  {isRelinking ? "Жду вход" : "Перелинк"}
+                </TinyActionButton>
+              ) : null}
+              <TinyActionButton
+                tone="danger"
+                compact
+                disabled={actionsLocked}
+                onClick={handleDeleteAccount}
+                ariaLabel={`Удалить сессию ${displayName}`}
+                title="Удалить сессию"
+              >
+                {isDeleting ? "..." : "×"}
+              </TinyActionButton>
             </div>
           </div>
 
@@ -618,7 +754,7 @@ export function AccountCard({ account }: { account: AccountSummary }) {
               <button
                 type="button"
                 onClick={handleConnectRepo}
-                disabled={!canSeedRepo || status === "launching" || status === "connecting"}
+                disabled={!canSeedRepo || actionsLocked}
                 className={`inline-flex min-h-[44px] items-center justify-center rounded-full border px-4 py-2.5 text-sm font-semibold transition disabled:cursor-not-allowed disabled:opacity-60 ${
                   isConnectButtonActive
                     ? "border-emerald-400/20 bg-emerald-400 text-slate-950 hover:bg-emerald-300"
@@ -636,10 +772,10 @@ export function AccountCard({ account }: { account: AccountSummary }) {
               <button
                 type="button"
                 onClick={handleStart}
-                disabled={status === "launching" || status === "connecting"}
+                disabled={needsRelink || actionsLocked}
                 className="inline-flex min-h-[44px] items-center justify-center rounded-full border border-[#c5d0de]/45 bg-[#202833] px-4 py-2.5 text-sm font-semibold text-[#f2f6fc] transition hover:bg-[#283240] disabled:cursor-not-allowed disabled:opacity-50"
               >
-                {status === "launching" ? "Открываю…" : "Старт"}
+                {status === "launching" ? "Открываю…" : needsRelink ? "Нужен перелинк" : "Старт"}
               </button>
             </div>
             <p className="mt-2 px-1 text-[11px] leading-5 text-[#7e8ea5]">{actionHint}</p>
@@ -989,6 +1125,60 @@ function SectionLabel({ children }: { children: ReactNode }) {
   );
 }
 
+function TinyActionButton({
+  ariaLabel,
+  children,
+  compact = false,
+  disabled,
+  onClick,
+  title,
+  tone,
+}: {
+  ariaLabel?: string;
+  children: ReactNode;
+  compact?: boolean;
+  disabled?: boolean;
+  onClick: () => void | Promise<void>;
+  title?: string;
+  tone: "neutral" | "warn" | "danger";
+}) {
+  const toneClass =
+    tone === "warn"
+      ? "border-amber-300/25 bg-amber-300/10 text-amber-100 hover:bg-amber-300/15"
+      : tone === "danger"
+        ? "border-rose-400/25 bg-rose-400/10 text-rose-200 hover:bg-rose-400/15"
+        : "border-white/10 bg-white/[0.04] text-[#c9d4e2] hover:bg-white/[0.08]";
+
+  return (
+    <button
+      type="button"
+      aria-label={ariaLabel}
+      title={title}
+      onClick={() => void onClick()}
+      disabled={disabled}
+      className={`inline-flex min-h-[28px] items-center justify-center rounded-full border py-1 text-[10px] font-semibold leading-none transition disabled:cursor-not-allowed disabled:opacity-50 ${
+        compact ? "min-w-[28px] px-2 text-sm" : "px-2.5"
+      } ${toneClass}`}
+    >
+      {children}
+    </button>
+  );
+}
+
+function AccountStatusBadge({
+  account,
+  needsRelink,
+}: {
+  account: AccountSummary;
+  needsRelink: boolean;
+}) {
+  if (needsRelink) {
+    return <InlineBadge tone="danger">сессия потеряна</InlineBadge>;
+  }
+
+  return <StatusBadge testStatus={account.testStatus} rateLimitedUntil={account.rateLimitedUntil} />;
+}
+
 function InlineBadge({
   children,
   tone,
@@ -1165,6 +1355,50 @@ function findPreferredPreparedSession(
   return preparedRepos.find((repo) => repo.sessionId) || null;
 }
 
+async function waitForCapturedLogin(ticket: string): Promise<void> {
+  const deadline = Date.now() + 10 * 60 * 1000;
+  while (Date.now() < deadline) {
+    await sleep(1500);
+    const res = await fetch(`/api/accounts/add/${encodeURIComponent(ticket)}`, { cache: "no-store" });
+    const json = (await res.json()) as CapturePollResponse;
+    if (!res.ok || !json.ok) {
+      throw new Error(json.error || `HTTP ${res.status}`);
+    }
+    if (json.status === "captured") return;
+    if (json.status === "error" || json.status === "expired") {
+      throw new Error(json.error || `Login capture ${json.status}`);
+    }
+  }
+  throw new Error("Login capture timed out");
+}
+
+function sleep(ms: number): Promise<void> {
+  return new Promise((resolve) => window.setTimeout(resolve, ms));
+}
+
+function formatLaunchError(json: LaunchResponse, status: number): string {
+  if (json.code === "profile_missing_no_cookie" || json.code === "profile_exists_no_cookie") {
+    return "Browser-сессия потеряна: старый профиль пустой/удален, а сохраненной cookie нет. Нужен один новый вход через «Перелинк вход».";
+  }
+  if (json.code === "profile_not_found") {
+    return "Сохраненный Chrome-профиль не найден. Нужен перелинк входа.";
+  }
+  return json.error || `HTTP ${status}`;
+}
+
+function describeBrowserProfile(account: AccountSummary): string | null {
+  if (account.browserProfileState === "relink-required") {
+    if (account.browserProfilePathExists === false) {
+      return "Старая browser-сессия была в temp-папке и уже удалена. Автовосстановить нельзя, потому что cookie не сохранилась.";
+    }
+    return "Browser-профиль есть, но внутри не видно Devin-cookie. Чтобы не открывать пустой Devin, нужен перелинк входа.";
+  }
+  if (account.browserProfileState === "recoverable") {
+    return "Старый профиль можно восстановить из сохраненной cookie; при старте dashboard перенесет вход в долговечный профиль.";
+  }
+  return null;
+}
+
 function describeBackendStartError(
   error: ConnectRepoResponse["backendStartError"],
 ): string | null {
@@ -1260,7 +1494,7 @@ function StatusBadge({
   if (testStatus === "valid" || testStatus === "ok") {
     return (
       <span className="rounded-full border border-emerald-400/20 bg-emerald-400/10 px-2.5 py-1 text-[10px] font-semibold uppercase tracking-[0.14em] text-emerald-200">
-        готов
+        готово
       </span>
     );
   }

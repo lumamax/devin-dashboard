@@ -111,6 +111,7 @@ export function updateLocalAccountCreds(
   id: string,
   creds: DevinCreds,
   providerSpecificData?: Record<string, unknown> | null,
+  updates: { name?: string; priority?: number } = {},
 ): void {
   const store = readStore();
   const index = store.accounts.findIndex((account) => account.id === id);
@@ -122,8 +123,19 @@ export function updateLocalAccountCreds(
   store.accounts[index] = buildUpdatedAccount(existing, creds, {
     providerSpecificData:
       providerSpecificData === undefined ? existing.providerSpecificData : providerSpecificData,
+    name: updates.name,
+    priority: updates.priority,
   });
   writeStore(store);
+}
+
+export function deleteLocalAccount(id: string): StoredDevinAccount | null {
+  const store = readStore();
+  const index = store.accounts.findIndex((account) => account.id === id);
+  if (index < 0) return null;
+  const [removed] = store.accounts.splice(index, 1);
+  writeStore(store);
+  return removed || null;
 }
 
 export function replaceLocalStoredAccounts(accounts: StoredDevinAccount[]): void {

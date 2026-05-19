@@ -38,6 +38,18 @@ test("launchChrome rejects nonexistent override binaries", () => {
   );
 });
 
+test("launchChrome rejects a saved explicit profile that disappeared", () => {
+  assert.throws(
+    () =>
+      launchChrome({
+        connectionId: "test-conn",
+        binaryPath: "/bin/true",
+        userDataDir: path.join(tmpdir(), "devin-dashboard-missing-profile"),
+      }),
+    (err: unknown) => err instanceof LauncherError && err.code === "profile_not_found"
+  );
+});
+
 test("launchChrome creates a per-connection profile and detaches the child", () => {
   const isWindows = process.platform === "win32";
   const noopBinary = isWindows ? "C:\\Windows\\System32\\cmd.exe" : "/bin/true";

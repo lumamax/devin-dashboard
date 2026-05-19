@@ -2,14 +2,14 @@
 
 ## Problem
 
-The dashboard and surrounding automation can open Devin sessions through Chrome with a fresh temporary `--user-data-dir` each time. If the window or link is closed without cleanup, the profile directory stays behind in `/private/tmp` or the macOS per-user temp directory. Over time this creates large stale browser profiles and Chrome code-sign clones, including directories like:
+Older dashboard builds and surrounding automation could open Devin sessions through Chrome with a fresh temporary `--user-data-dir` each time. If the window or link was closed without cleanup, the profile directory stayed behind in `/private/tmp` or the macOS per-user temp directory. Over time this created large stale browser profiles and Chrome code-sign clones, including directories like:
 
 - `/private/tmp/devin-chrome-userdata.*`
 - `/private/tmp/chrome-githubapp-*`
 - `/var/folders/.../T/devin-dashboard-login-*`
 - `/var/folders/.../X/com.google.Chrome.code_sign_clone/code_sign_clone.*`
 
-These directories are not the durable Devin dashboard store. They are browser runtime state, but they may contain short-lived session cookies while the matching browser is still alive.
+These directories are not the durable Devin dashboard store. Current capture flow should store new login profiles under `~/.devin-dashboard/profiles/`, but old temporary profile references may still exist in a migrated local vault. They may contain short-lived session cookies while the matching browser is still alive.
 
 ## Required Direction
 

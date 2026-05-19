@@ -11,6 +11,7 @@ import { randomUUID } from "node:crypto";
 import { homedir } from "node:os";
 import path from "node:path";
 import {
+  deleteLocalAccount,
   listLocalStoredAccounts,
   saveLocalAccount,
   updateLocalAccountCreds,
@@ -147,20 +148,36 @@ export async function updateAccountCreds(
   id: string,
   creds: DevinCreds,
   providerSpecificData?: Record<string, unknown> | null,
+  updates: { name?: string; priority?: number } = {},
 ): Promise<void> {
   if (getStoreMode() === "local") {
-    updateLocalAccountCreds(id, creds, providerSpecificData);
+    updateLocalAccountCreds(id, creds, providerSpecificData, updates);
     return;
   }
 
   try {
-    const saved = await updateAccountViaApi(id, creds, providerSpecificData);
+    const saved = await updateAccountViaApi(id, creds, providerSpecificData, updates);
     if (saved) return;
   } catch (error) {
     if (error instanceof MissingConfigError) throw error;
     console.warn("[connectionStore] OmniRoute API credential update failed, falling back to SQLite:", error);
   }
-  updateAccountDirect(id, creds, providerSpecificData);
+  updateAccountDirect(id, creds, providerSpecificData, updates);
+}
+
+export async function deleteStoredAccount(id: string): Promise<boolean> {
+  if (getStoreMode() === "local") {
+    return deleteLocalAccount(id) !== null;
+  }
+
+  try {
+    return await deleteAccountViaApi(id);
+  } catch (error) {
+    if (error instanceof MissingConfigError) throw error;
+    console.warn("[connectionStore] OmniRoute API delete failed, falling back to SQLite:", error);
+  }
+
+  return deleteAccountDirect(id);
 }
 
 async function listStoredAccountsViaApi(): Promise<StoredDevinAccount[]> {
@@ -226,6 +243,7 @@ async function updateAccountViaApi(
   id: string,
   creds: DevinCreds,
   providerSpecificData?: Record<string, unknown> | null,
+  updates: { name?: string; priority?: number } = {},
 ): Promise<boolean> {
   const { url, token } = requireAuthedEnv();
   const headers: Record<string, string> = {
@@ -242,6 +260,12 @@ async function updateAccountViaApi(
   if (providerSpecificData !== undefined) {
     body.providerSpecificData = providerSpecificData;
   }
+  if (updates.name) {
+    body.name = updates.name;
+  }
+  if (typeof updates.priority === "number") {
+    body.priority = updates.priority;
+  }
 
   const res = await fetch(`${url}/api/providers/${encodeURIComponent(id)}`, {
     method: "PATCH",
@@ -254,6 +278,28 @@ async function updateAccountViaApi(
     const text = await res.text().catch(() => "");
     throw new Error(
       `OmniRoute PATCH /api/providers/${id} failed: ${res.status} ${text.slice(0, 300)}`,
+    );
+  }
+
+  return true;
+}
+
+async function deleteAccountViaApi(id: string): Promise<boolean> {
+  const { url, token } = requireAuthedEnv();
+  const headers: Record<string, string> = { Accept: "application/json" };
+  if (token) headers.Authorization = `Bearer ${token}`;
+
+  const res = await fetch(`${url}/api/providers/${encodeURIComponent(id)}`, {
+    method: "DELETE",
+    headers,
+    cache: "no-store",
+  });
+
+  if (res.status === 404) return false;
+  if (!res.ok && res.status !== 204) {
+    const text = await res.text().catch(() => "");
+    throw new Error(
+      `OmniRoute DELETE /api/providers/${id} failed: ${res.status} ${text.slice(0, 300)}`,
     );
   }
 
@@ -353,6 +399,14 @@ function updateAccountDirect(
     SET ${updates.join(", ")}
     WHERE id = ${sqlString(id)}
   `);
+}
+
+function deleteAccountDirect(id: string): boolean {
+  runSqlCommand(`
+    DELETE FROM provider_connections
+    WHERE provider = 'devin-web' AND id = ${sqlString(id)}
+  `);
+  return true;
 }
 
 function runSqlJson(sql: string): JsonRecord[] {
