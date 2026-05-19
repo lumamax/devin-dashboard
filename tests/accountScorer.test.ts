@@ -19,7 +19,31 @@ test("scoreAccount gives highest score to active account with full quota and mat
   assert.equal(result.lifecycleScore, 30);
   assert.equal(result.repoScore, 20);
   assert.equal(result.lifecycle, "active");
+  assert.equal(result.quotaBand, "healthy");
+  assert.equal(result.effectiveHeadroom, 100);
   assert.equal(result.disqualified, false);
+});
+
+test("effectiveHeadroom uses the tighter daily or weekly quota", async () => {
+  const { effectiveHeadroom } = await import("../src/lib/accountScorer.ts");
+
+  assert.equal(effectiveHeadroom({ dailyPercentage: 80, weeklyPercentage: 40 }), 40);
+  assert.equal(effectiveHeadroom({ dailyPercentage: null, weeklyPercentage: 25 }), 25);
+  assert.equal(effectiveHeadroom({ dailyPercentage: 12, weeklyPercentage: null }), 12);
+  assert.equal(effectiveHeadroom({ dailyPercentage: null, weeklyPercentage: null }), null);
+  assert.equal(effectiveHeadroom(null), null);
+});
+
+test("computeQuotaBand follows sync-contract quota thresholds", async () => {
+  const { computeQuotaBand } = await import("../src/lib/accountScorer.ts");
+
+  assert.equal(computeQuotaBand(null), "unknown");
+  assert.equal(computeQuotaBand(80), "healthy");
+  assert.equal(computeQuotaBand(20), "draining");
+  assert.equal(computeQuotaBand(10), "checkpoint");
+  assert.equal(computeQuotaBand(5), "forced-handoff");
+  assert.equal(computeQuotaBand(2), "stop-work");
+  assert.equal(computeQuotaBand(0), "exhausted");
 });
 
 test("scoreAccount disqualifies account with no credentials", async () => {
@@ -39,6 +63,31 @@ test("scoreAccount disqualifies account with no credentials", async () => {
   assert.equal(result.lifecycle, "needs-relink");
   assert.equal(result.score, 0);
   assert.equal(result.disqualifyReason, "Account credentials missing or expired");
+});
+
+test("scoreAccount disqualifies account when browser session needs relink", async () => {
+  const { scoreAccount } = await import("../src/lib/accountScorer.ts");
+  const result = scoreAccount(
+    {
+      id: "acc-browser-lost",
+      name: "Lost Browser",
+      quota: { dailyPercentage: 100, weeklyPercentage: 100 },
+      lifecycle: {
+        hasCreds: true,
+        needsBrowserRelink: true,
+        testStatus: "valid",
+        rateLimitedUntil: null,
+        lastError: null,
+      },
+      repo: { assignedRepoFullName: "lumamax/devin-dashboard", assignedBranch: "main" },
+    },
+    { targetRepo: "lumamax/devin-dashboard" },
+  );
+
+  assert.equal(result.disqualified, true);
+  assert.equal(result.lifecycle, "needs-relink");
+  assert.equal(result.score, 0);
+  assert.equal(result.disqualifyReason, "Browser session lost; relink login");
 });
 
 test("scoreAccount disqualifies rate-limited account", async () => {
@@ -111,8 +160,29 @@ test("scoreAccount detects draining state when weekly quota is low", async () =>
 
   assert.equal(result.disqualified, false);
   assert.equal(result.lifecycle, "draining");
+  assert.equal(result.quotaBand, "checkpoint");
+  assert.equal(result.effectiveHeadroom, 8);
   assert.ok(result.score > 0);
   assert.equal(result.lifecycleScore, 15);
+});
+
+test("scoreAccount tags low daily quota without changing lifecycle disqualification", async () => {
+  const { scoreAccount } = await import("../src/lib/accountScorer.ts");
+  const result = scoreAccount(
+    {
+      id: "acc-band",
+      name: "Low Daily",
+      quota: { dailyPercentage: 4, weeklyPercentage: 90 },
+      lifecycle: { hasCreds: true, testStatus: "valid", rateLimitedUntil: null, lastError: null },
+      repo: { assignedRepoFullName: null, assignedBranch: null },
+    },
+    { targetRepo: null },
+  );
+
+  assert.equal(result.disqualified, false);
+  assert.equal(result.lifecycle, "active");
+  assert.equal(result.quotaBand, "forced-handoff");
+  assert.equal(result.effectiveHeadroom, 4);
 });
 
 test("scoreAccount gives zero repo score when target repo does not match", async () => {

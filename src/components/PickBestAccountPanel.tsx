@@ -8,6 +8,15 @@ import {
   type ActiveRepoSelection,
 } from "@/lib/activeRepo";
 
+type QuotaBand =
+  | "unknown"
+  | "healthy"
+  | "draining"
+  | "checkpoint"
+  | "forced-handoff"
+  | "stop-work"
+  | "exhausted";
+
 type ScoredAccount = {
   accountId: string;
   name: string;
@@ -16,6 +25,8 @@ type ScoredAccount = {
   lifecycleScore: number;
   repoScore: number;
   lifecycle: string;
+  quotaBand: QuotaBand;
+  effectiveHeadroom: number | null;
   dailyPercentage: number | null;
   weeklyPercentage: number | null;
   assignedRepoFullName: string | null;
@@ -26,7 +37,13 @@ type ScoredAccount = {
 type PickBestResponse = {
   ok: boolean;
   error?: string;
-  best: { accountId: string; name: string; score: number } | null;
+  best: {
+    accountId: string;
+    name: string;
+    score: number;
+    quotaBand: QuotaBand;
+    effectiveHeadroom: number | null;
+  } | null;
   ranked: ScoredAccount[];
   targetRepo: string | null;
 };
@@ -148,6 +165,8 @@ function RankingResult({
   onToggleExpand: () => void;
 }) {
   const { best, ranked } = data;
+  const bestScored = best ? ranked.find((item) => item.accountId === best.accountId) || null : null;
+  const quotaWarning = bestScored ? getQuotaWarning(bestScored.quotaBand) : null;
 
   return (
     <div className="space-y-3">
@@ -156,7 +175,10 @@ function RankingResult({
           <div className="text-[11px] font-semibold uppercase tracking-[0.18em] text-emerald-200/85">
             Рекомендация
           </div>
-          <div className="mt-1 text-base font-semibold text-emerald-50">{best.name}</div>
+          <div className="mt-1 flex flex-wrap items-center gap-2">
+            <span className="text-base font-semibold text-emerald-50">{best.name}</span>
+            <QuotaBandBadge band={best.quotaBand} headroom={best.effectiveHeadroom} />
+          </div>
           <div className="mt-1 text-sm text-emerald-200/75">Score {best.score}/100</div>
         </div>
       ) : (
@@ -164,6 +186,13 @@ function RankingResult({
           Сейчас нет квалифицированного аккаунта: все exhausted, rate-limited или требуют relink.
         </div>
       )}
+
+      {quotaWarning ? (
+        <div className={`rounded-[14px] border px-3 py-2 text-xs ${quotaWarning.tone}`}>
+          <div className="font-semibold">{quotaWarning.title}</div>
+          <div className="mt-0.5 leading-5 opacity-90">{quotaWarning.body}</div>
+        </div>
+      ) : null}
 
       <button
         onClick={onToggleExpand}
@@ -204,11 +233,13 @@ function RankedAccountRow({ account, rank }: { account: ScoredAccount; rank: num
           <span className={`rounded-full px-2 py-0.5 text-[10px] font-semibold ${lifecycleColor}`}>
             {account.lifecycle}
           </span>
+          <QuotaBandBadge band={account.quotaBand} headroom={account.effectiveHeadroom} />
         </div>
         <div className="mt-0.5 flex flex-wrap gap-2 text-[10px] text-[#8293aa]">
           <span>Q {account.quotaScore}</span>
           <span>L {account.lifecycleScore}</span>
           <span>R {account.repoScore}</span>
+          {account.effectiveHeadroom !== null ? <span>Eff {Math.round(account.effectiveHeadroom)}%</span> : null}
           {account.dailyPercentage !== null ? <span>Day {Math.round(account.dailyPercentage)}%</span> : null}
           {account.weeklyPercentage !== null ? <span>Week {Math.round(account.weeklyPercentage)}%</span> : null}
         </div>
@@ -220,6 +251,99 @@ function RankedAccountRow({ account, rank }: { account: ScoredAccount; rank: num
       <div className="text-right text-sm font-semibold text-[#aab5c4]">{account.score}</div>
     </div>
   );
+}
+
+function QuotaBandBadge({
+  band,
+  headroom,
+}: {
+  band: QuotaBand;
+  headroom: number | null;
+}) {
+  const { label, color, title } = describeQuotaBand(band);
+  const headroomLabel = headroom !== null ? ` ${Math.round(headroom)}%` : "";
+
+  return (
+    <span
+      title={title}
+      className={`rounded-full border px-2 py-0.5 text-[10px] font-semibold leading-none ${color}`}
+    >
+      {label}
+      {headroomLabel}
+    </span>
+  );
+}
+
+function describeQuotaBand(band: QuotaBand): { label: string; color: string; title: string } {
+  switch (band) {
+    case "healthy":
+      return {
+        label: "норма",
+        color: "border-emerald-400/20 bg-emerald-400/10 text-emerald-200",
+        title: "Больше 20% эффективной квоты. Можно брать обычную задачу.",
+      };
+    case "draining":
+      return {
+        label: "тает",
+        color: "border-amber-400/20 bg-amber-400/10 text-amber-200",
+        title: "20% или меньше. Не начинай широкую новую задачу.",
+      };
+    case "checkpoint":
+      return {
+        label: "checkpoint",
+        color: "border-orange-400/20 bg-orange-400/10 text-orange-200",
+        title: "10% или меньше. Нужен чистый checkpoint.",
+      };
+    case "forced-handoff":
+      return {
+        label: "handoff",
+        color: "border-rose-400/25 bg-rose-400/10 text-rose-200",
+        title: "5% или меньше. Пушим ветку и передаем работу.",
+      };
+    case "stop-work":
+      return {
+        label: "stop",
+        color: "border-red-500/35 bg-red-500/15 text-red-200",
+        title: "2% или меньше. Только финальный sync, без новой реализации.",
+      };
+    case "exhausted":
+      return {
+        label: "exhausted",
+        color: "border-zinc-400/20 bg-zinc-400/10 text-zinc-300",
+        title: "Квота закончилась.",
+      };
+    case "unknown":
+      return {
+        label: "нет квоты",
+        color: "border-white/10 bg-white/5 text-[#aab5c4]",
+        title: "Нет свежих данных по квоте.",
+      };
+  }
+}
+
+function getQuotaWarning(band: QuotaBand): { title: string; body: string; tone: string } | null {
+  switch (band) {
+    case "checkpoint":
+      return {
+        title: "Checkpoint-зона",
+        body: "Эффективная квота 10% или ниже. Лучше сделать чистый checkpoint перед продолжением.",
+        tone: "border-orange-400/25 bg-orange-400/10 text-orange-200",
+      };
+    case "forced-handoff":
+      return {
+        title: "Зона принудительного handoff",
+        body: "Эффективная квота 5% или ниже. Надо пушить рабочую ветку и передавать задачу свежему аккаунту.",
+        tone: "border-rose-400/30 bg-rose-400/10 text-rose-200",
+      };
+    case "stop-work":
+      return {
+        title: "Stop-work зона",
+        body: "Эффективная квота 2% или ниже. Только финализируем sync, новую работу не начинаем.",
+        tone: "border-red-500/40 bg-red-500/15 text-red-200",
+      };
+    default:
+      return null;
+  }
 }
 
 function getLifecycleColor(lifecycle: string): string {
