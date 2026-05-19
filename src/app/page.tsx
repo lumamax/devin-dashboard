@@ -1,7 +1,6 @@
 import { AccountCard } from "@/components/AccountCard";
 import { AddAccountWizard } from "@/components/AddAccountWizard";
 import { ControlPlaneStatus } from "@/components/ControlPlaneStatus";
-import { PickBestAccountPanel } from "@/components/PickBestAccountPanel";
 import { RepoBootstrapPanel } from "@/components/RepoBootstrapPanel";
 import type { AccountSummary } from "@/lib/accountSummary";
 import { orderStoredAccountsByHealth } from "@/lib/accountOrdering";
@@ -104,7 +103,6 @@ export default async function Home() {
           <div className="space-y-4">
             <AddAccountWizard />
             <RepoBootstrapPanel />
-            <PickBestAccountPanel />
           </div>
         </aside>
 

@@ -1,5 +1,5 @@
 /**
- * Score Devin accounts for pick-best-account selection.
+ * Score Devin accounts for routing, ordering, and supervisor decisions.
  *
  * Each account is scored on three dimensions:
  *   1. quota  — remaining daily + weekly headroom (0-50 points)
