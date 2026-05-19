@@ -215,6 +215,11 @@ type BootstrapAssistState =
       sessionId: string | null;
     };
 
+const CHIP_CLASS =
+  "inline-flex min-h-[22px] items-center rounded-full border px-2 py-0.5 text-[9px] font-semibold leading-none tracking-[0.04em]";
+const CHIP_ICON_CLASS =
+  "inline-flex min-h-[22px] min-w-[22px] items-center justify-center rounded-full border px-1 text-[11px] font-semibold leading-none";
+
 export function AccountCard({ account }: { account: AccountSummary }) {
   const [status, setStatus] = useState<Status>("idle");
   const [statusMessage, setStatusMessage] = useState<string | null>(null);
@@ -686,7 +691,7 @@ export function AccountCard({ account }: { account: AccountSummary }) {
                   disabled={actionsLocked}
                   onClick={handleRelink}
                 >
-                  {isRelinking ? "Жду вход" : "Перелинк"}
+                  {isRelinking ? "жду вход" : "перелинк"}
                 </TinyActionButton>
               ) : null}
               <TinyActionButton
@@ -1156,9 +1161,7 @@ function TinyActionButton({
       title={title}
       onClick={() => void onClick()}
       disabled={disabled}
-      className={`inline-flex min-h-[28px] items-center justify-center rounded-full border py-1 text-[10px] font-semibold leading-none transition disabled:cursor-not-allowed disabled:opacity-50 ${
-        compact ? "min-w-[28px] px-2 text-sm" : "px-2.5"
-      } ${toneClass}`}
+      className={`${compact ? CHIP_ICON_CLASS : CHIP_CLASS} justify-center transition disabled:cursor-not-allowed disabled:opacity-50 ${toneClass}`}
     >
       {children}
     </button>
@@ -1195,7 +1198,7 @@ function InlineBadge({
           ? "border-rose-400/20 bg-rose-400/10 text-rose-200"
           : "border-white/10 bg-white/[0.04] text-[#c9d4e2]";
 
-  return <span className={`rounded-full border px-2.5 py-1 ${toneClass}`}>{children}</span>;
+  return <span className={`${CHIP_CLASS} ${toneClass}`}>{children}</span>;
 }
 
 function MetaPill({ label, value }: { label: string; value: string }) {
@@ -1486,20 +1489,20 @@ function StatusBadge({
 
   if (isRateLimited) {
     return (
-      <span className="rounded-full border border-rose-400/20 bg-rose-400/10 px-2.5 py-1 text-[10px] font-semibold uppercase tracking-[0.14em] text-rose-200">
+      <span className={`${CHIP_CLASS} border-rose-400/20 bg-rose-400/10 text-rose-200`}>
         пауза
       </span>
     );
   }
   if (testStatus === "valid" || testStatus === "ok") {
     return (
-      <span className="rounded-full border border-emerald-400/20 bg-emerald-400/10 px-2.5 py-1 text-[10px] font-semibold uppercase tracking-[0.14em] text-emerald-200">
+      <span className={`${CHIP_CLASS} border-emerald-400/20 bg-emerald-400/10 text-emerald-200`}>
         готово
       </span>
     );
   }
   return (
-    <span className="rounded-full border border-white/10 bg-white/[0.04] px-2.5 py-1 text-[10px] font-semibold uppercase tracking-[0.14em] text-[#aeb8c8]">
+    <span className={`${CHIP_CLASS} border-white/10 bg-white/[0.04] text-[#aeb8c8]`}>
       {testStatus || "неизвестно"}
     </span>
   );
